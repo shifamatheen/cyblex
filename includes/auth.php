@@ -11,7 +11,7 @@ class Auth {
 
     public function __construct($conn) {
         $this->conn = $conn;
-        $this->jwt_secret = getenv('JWT_SECRET') ?: 'your-secret-key-here';
+        $this->jwt_secret = JWT_SECRET;
     }
 
     public function register($username, $email, $password, $full_name, $user_type) {
@@ -97,7 +97,7 @@ class Auth {
             'email' => $user['email'],
             'user_type' => $user['user_type'],
             'iat' => time(),
-            'exp' => time() + (60 * 60) // 1 hour expiration
+            'exp' => time() + (24 * 60 * 60) // 24 hours expiration
         ];
 
         return JWT::encode($payload, $this->jwt_secret, 'HS256');

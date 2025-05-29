@@ -9,30 +9,33 @@ define('JWT_SECRET', 'cyblex-secure-jwt-secret-key-2024');
 class Database {
     private static $instance = null;
     private $conn;
+    
+    private $host = 'localhost';
+    private $db_name = 'cyblex';
+    private $username = 'root';
+    private $password = '';
 
     private function __construct() {
         try {
-            // First connect without database to create it if it doesn't exist
-            $tempConn = new PDO("mysql:host=" . DB_HOST, DB_USER, DB_PASS);
-            $tempConn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            
-            // Create database if it doesn't exist
-            $tempConn->exec("CREATE DATABASE IF NOT EXISTS " . DB_NAME);
-            
-            // Now connect to the specific database
-            $this->conn = new PDO("mysql:host=" . DB_HOST . ";dbname=" . DB_NAME, DB_USER, DB_PASS);
-            $this->conn->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $this->conn->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-            $this->conn->setAttribute(PDO::ATTR_EMULATE_PREPARES, false);
+            $this->conn = new PDO(
+                "mysql:host=" . $this->host . ";dbname=" . $this->db_name,
+                $this->username,
+                $this->password,
+                array(
+                    PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+                    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+                    PDO::MYSQL_ATTR_INIT_COMMAND => "SET NAMES utf8"
+                )
+            );
         } catch(PDOException $e) {
-            error_log("Database Connection Error: " . $e->getMessage());
-            die("Connection failed: " . $e->getMessage());
+            error_log("Connection Error: " . $e->getMessage());
+            throw new Exception("Database connection failed: " . $e->getMessage());
         }
     }
 
     public static function getInstance() {
-        if (self::$instance === null) {
-            self::$instance = new self();
+        if (self::$instance == null) {
+            self::$instance = new Database();
         }
         return self::$instance;
     }

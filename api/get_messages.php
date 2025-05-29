@@ -1,35 +1,58 @@
 <?php
 require_once '../config/database.php';
+require_once 'cors_config.php';
 
 // Enable error reporting for debugging
 error_reporting(E_ALL);
 ini_set('display_errors', 1);
 
+// Set up custom error logging
+function customErrorLog($message) {
+    $logFile = __DIR__ . '/../logs/api_errors.log';
+    $logDir = dirname($logFile);
+    
+    // Create logs directory if it doesn't exist
+    if (!file_exists($logDir)) {
+        mkdir($logDir, 0777, true);
+    }
+    
+    $timestamp = date('Y-m-d H:i:s');
+    $logMessage = "[$timestamp] $message\n";
+    file_put_contents($logFile, $logMessage, FILE_APPEND);
+}
+
 // Get authorization header
 $headers = getallheaders();
 $auth_header = isset($headers['Authorization']) ? $headers['Authorization'] : '';
 
-// Log incoming request
-error_log("get_messages.php called with queryId: " . (isset($_GET['queryId']) ? $_GET['queryId'] : 'not set'));
-error_log("Auth header: " . $auth_header);
+// Log incoming request details
+customErrorLog("=== get_messages.php Request Details ===");
+customErrorLog("Request Method: " . $_SERVER['REQUEST_METHOD']);
+customErrorLog("Query ID: " . (isset($_GET['queryId']) ? $_GET['queryId'] : 'not set'));
+customErrorLog("Auth header: " . $auth_header);
+customErrorLog("Request Headers: " . print_r($headers, true));
 
 // Check if token exists
 if (!$auth_header || !preg_match('/Bearer\s+(.*)$/i', $auth_header, $matches)) {
-    error_log("No valid authorization token provided");
+    customErrorLog("No valid authorization token provided");
+    customErrorLog("Auth header format check failed");
     http_response_code(401);
     echo json_encode(['success' => false, 'error' => 'Unauthorized access - please log in']);
     exit();
 }
 
 $token = $matches[1];
+customErrorLog("Token extracted: " . substr($token, 0, 20) . "..."); // Log first 20 chars of token for security
 
 try {
     $db = Database::getInstance();
     $conn = $db->getConnection();
+    customErrorLog("Database connection successful");
 
     // Extract and verify token
     $tokenParts = explode('.', $token);
     if (count($tokenParts) !== 3) {
+        customErrorLog("Invalid token format - parts count: " . count($tokenParts));
         throw new Exception('Invalid token format');
     }
 
@@ -38,6 +61,7 @@ try {
     $signature = base64_decode(str_replace(['-', '_'], ['+', '/'], $tokenParts[2]));
 
     if (!$header || !$payload || !$signature) {
+        customErrorLog("Token parts validation failed");
         throw new Exception('Invalid token parts');
     }
 
@@ -49,41 +73,24 @@ try {
     );
 
     if (!hash_equals($signature, $expectedSignature)) {
+        customErrorLog("Token signature verification failed");
         throw new Exception('Invalid token signature');
     }
 
     // Check token expiration
     if (isset($payload['exp']) && $payload['exp'] < time()) {
+        customErrorLog("Token expired. Exp: " . $payload['exp'] . ", Current time: " . time());
         throw new Exception('Token has expired');
     }
-
-    // Verify token and get user info
-    $stmt = $conn->prepare("
-        SELECT u.id, u.user_type, u.full_name 
-        FROM users u 
-        WHERE u.id = ? AND u.status = 'active'
-    ");
-    
-    $stmt->execute([$payload['user_id']]);
-    $user = $stmt->fetch(PDO::FETCH_ASSOC);
-
-    if (!$user) {
-        error_log("Invalid token or user not found for ID: " . $payload['user_id']);
-        http_response_code(401);
-        echo json_encode(['success' => false, 'error' => 'Invalid token or user not found']);
-        exit();
-    }
-
-    error_log("User authenticated: " . print_r($user, true));
 
     // Get query parameters
     $queryId = isset($_GET['queryId']) ? intval($_GET['queryId']) : null;
     $lastId = isset($_GET['lastId']) ? intval($_GET['lastId']) : 0;
 
-    error_log("Processing request - queryId: $queryId, lastId: $lastId, userId: {$user['id']}, userType: {$user['user_type']}");
+    customErrorLog("Processing request - queryId: $queryId, lastId: $lastId, userId: {$payload['user_id']}");
 
     if (!$queryId) {
-        error_log("Invalid query ID provided");
+        customErrorLog("Invalid query ID provided");
         http_response_code(400);
         echo json_encode(['success' => false, 'error' => 'Query ID is required']);
         exit();
@@ -91,49 +98,28 @@ try {
 
     // First verify the query exists and get its details
     $stmt = $conn->prepare("
-        SELECT lq.*, u.user_type as client_type 
+        SELECT lq.*, u.user_type as client_type,
+               l.user_id as lawyer_user_id
         FROM legal_queries lq
         JOIN users u ON lq.client_id = u.id
+        LEFT JOIN lawyers l ON lq.lawyer_id = l.id
         WHERE lq.id = ?
     ");
     $stmt->execute([$queryId]);
     $query = $stmt->fetch(PDO::FETCH_ASSOC);
 
     if (!$query) {
-        error_log("Query not found: $queryId");
+        customErrorLog("Query not found: $queryId");
         http_response_code(404);
         echo json_encode(['success' => false, 'error' => 'Query not found']);
         exit();
     }
 
-    error_log("Query found: " . print_r($query, true));
-
-    // Check if user has access to this query
-    $hasAccess = false;
-    if ($user['user_type'] === 'client') {
-        // Client can only access their own queries
-        $hasAccess = ($query['client_id'] === $user['id']);
-        error_log("Client access check - client_id: {$query['client_id']}, user_id: {$user['id']}, hasAccess: " . ($hasAccess ? 'true' : 'false'));
-    } else if ($user['user_type'] === 'lawyer') {
-        // Lawyer can access if they are assigned to the query
-        $stmt = $conn->prepare("
-            SELECT 1 
-            FROM lawyers l 
-            WHERE l.id = ? AND l.user_id = ?
-        ");
-        $stmt->execute([$query['lawyer_id'], $user['id']]);
-        $hasAccess = ($stmt->rowCount() > 0);
-        error_log("Lawyer access check - lawyer_id: {$query['lawyer_id']}, user_id: {$user['id']}, hasAccess: " . ($hasAccess ? 'true' : 'false'));
-    } else if ($user['user_type'] === 'admin') {
-        // Admins have access to all queries
-        $hasAccess = true;
-        error_log("Admin access granted");
-    }
-
-    if (!$hasAccess) {
-        error_log("Access denied to query $queryId for user {$user['id']} (type: {$user['user_type']})");
+    // Verify user has access to this query
+    if ($query['client_id'] != $payload['user_id'] && $query['lawyer_user_id'] != $payload['user_id']) {
+        customErrorLog("Unauthorized access to query: $queryId");
         http_response_code(403);
-        echo json_encode(['success' => false, 'error' => 'Access denied to this query']);
+        echo json_encode(['success' => false, 'error' => 'Unauthorized access to this query']);
         exit();
     }
 
@@ -145,19 +131,24 @@ try {
             u.user_type as sender_type,
             CASE 
                 WHEN m.sender_id = ? THEN 'You'
-                WHEN u.user_type = 'lawyer' THEN CONCAT('Lawyer: ', u.full_name)
+                WHEN u.user_type = 'lawyer' THEN u.full_name
+                WHEN u.user_type = 'client' THEN u.full_name
                 ELSE u.full_name
-            END as display_name
+            END as display_name,
+            CASE 
+                WHEN m.sender_id = ? THEN 'sent'
+                ELSE 'received'
+            END as message_type
         FROM messages m
         JOIN users u ON m.sender_id = u.id
         WHERE m.legal_query_id = ? AND m.id > ?
         ORDER BY m.created_at ASC
     ");
     
-    error_log("Executing message query for queryId: $queryId, lastId: $lastId");
-    $stmt->execute([$user['id'], $queryId, $lastId]);
+    customErrorLog("Executing message query for queryId: $queryId, lastId: $lastId");
+    $stmt->execute([$payload['user_id'], $payload['user_id'], $queryId, $lastId]);
     $messages = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    error_log("Found " . count($messages) . " messages");
+    customErrorLog("Found " . count($messages) . " messages");
 
     // Mark messages as read for the current user
     if (!empty($messages)) {
@@ -168,8 +159,8 @@ try {
             AND sender_id != ? 
             AND is_read = FALSE
         ");
-        $stmt->execute([$queryId, $user['id']]);
-        error_log("Marked messages as read for query $queryId");
+        $stmt->execute([$queryId, $payload['user_id']]);
+        customErrorLog("Marked messages as read for query $queryId");
     }
 
     // Return messages as JSON
@@ -178,13 +169,13 @@ try {
         'success' => true, 
         'messages' => $messages,
         'last_id' => !empty($messages) ? end($messages)['id'] : $lastId,
-        'query_status' => $query['status'] // Include query status in response
+        'query_status' => $query['status']
     ]);
 
 } catch (PDOException $e) {
-    error_log("Database error in get_messages.php: " . $e->getMessage());
-    error_log("SQL State: " . $e->getCode());
-    error_log("Error Info: " . print_r($e->errorInfo, true));
+    customErrorLog("Database error in get_messages.php: " . $e->getMessage());
+    customErrorLog("SQL State: " . $e->getCode());
+    customErrorLog("Error Info: " . print_r($e->errorInfo, true));
     http_response_code(500);
     echo json_encode([
         'success' => false, 
@@ -193,8 +184,8 @@ try {
         'code' => $e->getCode()
     ]);
 } catch (Exception $e) {
-    error_log("Error in get_messages.php: " . $e->getMessage());
-    error_log("Stack trace: " . $e->getTraceAsString());
+    customErrorLog("Error in get_messages.php: " . $e->getMessage());
+    customErrorLog("Stack trace: " . $e->getTraceAsString());
     http_response_code(500);
     echo json_encode([
         'success' => false, 

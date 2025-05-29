@@ -14,13 +14,78 @@ $conn = $db->getConnection();
 
 // Get platform statistics
 try {
+    // Check if queries table exists, if not create it
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'queries'");
+    if ($tableCheck->rowCount() == 0) {
+        $sql = "CREATE TABLE IF NOT EXISTS queries (
+            id INT(11) AUTO_INCREMENT PRIMARY KEY,
+            client_id INT(11) NOT NULL,
+            lawyer_id INT(11),
+            title VARCHAR(255) NOT NULL,
+            description TEXT NOT NULL,
+            category VARCHAR(100) NOT NULL,
+            urgency_level ENUM('low', 'medium', 'high') DEFAULT 'medium',
+            status ENUM('pending', 'assigned', 'in_progress', 'completed', 'cancelled') DEFAULT 'pending',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            assigned_at TIMESTAMP NULL DEFAULT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            FOREIGN KEY (client_id) REFERENCES users(id) ON DELETE CASCADE,
+            FOREIGN KEY (lawyer_id) REFERENCES users(id) ON DELETE SET NULL
+        )";
+        $conn->exec($sql);
+    } else {
+        // Check if assigned_at column exists
+        $columnCheck = $conn->query("SHOW COLUMNS FROM queries LIKE 'assigned_at'");
+        if ($columnCheck->rowCount() == 0) {
+            // Add assigned_at column if it doesn't exist
+            $conn->exec("ALTER TABLE queries ADD COLUMN assigned_at TIMESTAMP NULL DEFAULT NULL AFTER created_at");
+        }
+    }
+
+    // Get total queries count
+    $stmt = $conn->query("SELECT COUNT(*) as count FROM queries");
+    $total_queries = $stmt->fetch()['count'];
+
+    // Get pending queries count
+    $stmt = $conn->query("SELECT COUNT(*) as count FROM queries WHERE status = 'pending'");
+    $pending_queries = $stmt->fetch()['count'];
+
+    // Get active users count
+    $stmt = $conn->query("SELECT COUNT(*) as count FROM users WHERE status = 'active'");
+    $active_users = $stmt->fetch()['count'];
+
+    // Get total revenue
+    $stmt = $conn->query("SELECT COALESCE(SUM(amount), 0) as total FROM payments WHERE status = 'completed'");
+    $total_revenue = $stmt->fetch()['total'];
+
+    // Get recent queries
+    $stmt = $conn->query("
+        SELECT q.*, 
+               c.full_name as client_name,
+               l.full_name as lawyer_name
+        FROM queries q
+        LEFT JOIN users c ON q.client_id = c.id
+        LEFT JOIN users l ON q.lawyer_id = l.id
+        ORDER BY q.created_at DESC
+        LIMIT 5
+    ");
+    $recent_queries = $stmt->fetchAll();
+
+    // Get recent users
+    $stmt = $conn->query("
+        SELECT * FROM users 
+        ORDER BY created_at DESC 
+        LIMIT 5
+    ");
+    $recent_users = $stmt->fetchAll();
+
     $stats = [
         'total_users' => $conn->query("SELECT COUNT(*) FROM users")->fetchColumn(),
         'total_lawyers' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'lawyer'")->fetchColumn(),
         'total_clients' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'client'")->fetchColumn(),
-        'total_queries' => $conn->query("SELECT COUNT(*) FROM queries")->fetchColumn(),
-        'active_queries' => $conn->query("SELECT COUNT(*) FROM queries WHERE status = 'active'")->fetchColumn(),
-        'pending_verifications' => $conn->query("SELECT COUNT(*) FROM lawyer_verifications WHERE status = 'pending'")->fetchColumn()
+        'total_queries' => $total_queries,
+        'active_queries' => $active_users,
+        'pending_verifications' => $pending_queries
     ];
 } catch (PDOException $e) {
     // If lawyer_verifications table doesn't exist, set pending_verifications to 0
@@ -29,21 +94,40 @@ try {
             'total_users' => $conn->query("SELECT COUNT(*) FROM users")->fetchColumn(),
             'total_lawyers' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'lawyer'")->fetchColumn(),
             'total_clients' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'client'")->fetchColumn(),
-            'total_queries' => $conn->query("SELECT COUNT(*) FROM queries")->fetchColumn(),
-            'active_queries' => $conn->query("SELECT COUNT(*) FROM queries WHERE status = 'active'")->fetchColumn(),
+            'total_queries' => $total_queries,
+            'active_queries' => $active_users,
             'pending_verifications' => 0
         ];
     } else {
-        throw $e; // Re-throw if it's a different error
+        error_log("Error in admin-dashboard.php: " . $e->getMessage());
+        $total_queries = 0;
+        $pending_queries = 0;
+        $active_users = 0;
+        $total_revenue = 0;
+        $recent_queries = [];
+        $recent_users = [];
+        $stats = [
+            'total_users' => $conn->query("SELECT COUNT(*) FROM users")->fetchColumn(),
+            'total_lawyers' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'lawyer'")->fetchColumn(),
+            'total_clients' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'client'")->fetchColumn(),
+            'total_queries' => $total_queries,
+            'active_queries' => $active_users,
+            'pending_verifications' => 0
+        ];
     }
 }
 
 // Get average response time (in hours)
-$avgResponseTime = $conn->query("
-    SELECT AVG(TIMESTAMPDIFF(HOUR, created_at, assigned_at)) 
-    FROM queries 
-    WHERE status != 'pending' AND assigned_at IS NOT NULL
-")->fetchColumn();
+try {
+    $avgResponseTime = $conn->query("
+        SELECT COALESCE(AVG(TIMESTAMPDIFF(HOUR, created_at, assigned_at)), 0) as avg_time
+        FROM queries 
+        WHERE status != 'pending' AND assigned_at IS NOT NULL
+    ")->fetchColumn();
+} catch (PDOException $e) {
+    error_log("Error calculating average response time: " . $e->getMessage());
+    $avgResponseTime = 0;
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -496,17 +580,11 @@ $avgResponseTime = $conn->query("
                     }
                     return response.json();
                 })
-                .then(data => {
+                .then(verifications => {
                     const tbody = document.getElementById('verificationsTableBody');
                     tbody.innerHTML = '';
                     
-                    if (data.error) {
-                        throw new Error(data.error);
-                    }
-                    
-                    const verifications = Array.isArray(data) ? data : (data.verifications || []);
-                    
-                    if (verifications.length === 0) {
+                    if (!Array.isArray(verifications) || verifications.length === 0) {
                         tbody.innerHTML = `
                             <tr>
                                 <td colspan="5" class="text-center py-4">
@@ -534,7 +612,10 @@ $avgResponseTime = $conn->query("
                                     </div>
                                 </div>
                             </td>
-                            <td>${verification.specialization}</td>
+                            <td>
+                                <div>${verification.specialization || 'Not specified'}</div>
+                                <small class="text-muted">${verification.experience_years || 0} years experience</small>
+                            </td>
                             <td>${new Date(verification.submitted_at).toLocaleDateString()}</td>
                             <td>
                                 <button class="btn btn-sm btn-outline-primary" 

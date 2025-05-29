@@ -1,23 +1,23 @@
 $(document).ready(function() {
-    // Display user name from localStorage
-    const user = JSON.parse(localStorage.getItem('user'));
-    if (user) {
-        document.getElementById('userName').textContent = user.full_name;
+    // Check authentication
+    const token = localStorage.getItem('token');
+    const user = JSON.parse(localStorage.getItem('user') || '{}');
+
+    if (!token || !user.id) {
+        window.location.href = 'login.html';
+        return;
     }
 
-    // Handle logout
-    document.querySelector('a[href="logout.php"]').addEventListener('click', function(e) {
-        e.preventDefault();
-        localStorage.removeItem('user');
-        localStorage.removeItem('auth_token');
-        window.location.href = 'logout.php';
-    });
+    // Set user name in navbar
+    const userNameElement = document.getElementById('userName');
+    if (userNameElement) {
+        userNameElement.textContent = user.full_name || user.username;
+    }
 
     // Chat functionality
     let currentQueryId = null;
     let lastMessageId = 0;
-    let pollInterval = null;
-    let chatModal = null;
+    let chatInterval = null;
 
     function showError(message) {
         console.error('Chat Error:', message);
@@ -64,18 +64,36 @@ $(document).ready(function() {
 
     function startPolling(queryId) {
         console.log('Starting polling for query:', queryId);
-        if (pollInterval) {
-            clearInterval(pollInterval);
+        if (chatInterval) {
+            clearInterval(chatInterval);
         }
         
-        pollInterval = setInterval(() => {
+        chatInterval = setInterval(() => {
             console.log('Polling for new messages, lastId:', lastMessageId);
+            if (!token) {
+                clearInterval(chatInterval);
+                showError('Please log in to continue');
+                window.location.href = 'login.html';
+                return;
+            }
+
             fetch(`api/get_messages.php?queryId=${queryId}&lastId=${lastMessageId}`, {
+                method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
-                }
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                credentials: 'include'
             })
             .then(response => {
+                if (response.status === 401) {
+                    clearInterval(chatInterval);
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    window.location.href = 'login.html';
+                    throw new Error('Session expired. Please log in again.');
+                }
                 if (!response.ok) {
                     throw new Error(`HTTP error! status: ${response.status}`);
                 }
@@ -94,6 +112,9 @@ $(document).ready(function() {
             })
             .catch(error => {
                 console.error('Error polling messages:', error);
+                if (error.message.includes('Session expired')) {
+                    showError(error.message);
+                }
             });
         }, 3000); // Poll every 3 seconds
     }
@@ -103,6 +124,17 @@ $(document).ready(function() {
         if (!queryId) {
             console.error('Invalid query ID provided to initializeChat');
             showError('Invalid query ID. Please try again.');
+            return;
+        }
+
+        // Check if user is logged in
+        const user = JSON.parse(localStorage.getItem('user'));
+        const token = localStorage.getItem('token');
+        
+        if (!user || !token) {
+            console.error('User not logged in or token missing');
+            showError('Please log in to access the chat');
+            window.location.href = 'login.html';
             return;
         }
 
@@ -131,10 +163,17 @@ $(document).ready(function() {
         console.log('Fetching initial messages for query:', queryId);
         fetch(`api/get_messages.php?queryId=${queryId}`, {
             headers: {
-                'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                'Authorization': `Bearer ${token}`
             }
         })
         .then(response => {
+            if (response.status === 401) {
+                // Token expired or invalid
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = 'login.html';
+                throw new Error('Session expired. Please log in again.');
+            }
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -170,7 +209,7 @@ $(document).ready(function() {
             chatMessages.innerHTML = `
                 <div class="alert alert-danger m-3">
                     <i class="fas fa-exclamation-circle me-2"></i>
-                    Failed to load messages: ${error.message}
+                    ${error.message}
                     <button class="btn btn-sm btn-outline-danger ms-3" onclick="initializeChat(${queryId})">
                         <i class="fas fa-sync-alt"></i> Retry
                     </button>
@@ -179,89 +218,202 @@ $(document).ready(function() {
         });
     }
 
-    // Add event listeners for chat buttons
+    // Start chat button click handler
     document.querySelectorAll('.start-chat').forEach(button => {
         button.addEventListener('click', function() {
             const queryId = this.dataset.id;
-            console.log('Chat button clicked for query:', queryId);
-            if (!queryId) {
-                console.error('No query ID found on chat button');
-                showError('Invalid query ID. Please try again.');
-                return;
-            }
-            initializeChat(queryId);
-            if (!chatModal) {
-                chatModal = new bootstrap.Modal(document.getElementById('chatModal'));
-            }
+            currentQueryId = queryId;
+            lastMessageId = 0;
+            
+            // Show chat modal
+            const chatModal = new bootstrap.Modal(document.getElementById('chatModal'));
             chatModal.show();
+            
+            // Start polling for messages
+            if (chatInterval) {
+                clearInterval(chatInterval);
+            }
+            loadMessages();
+            chatInterval = setInterval(loadMessages, 3000);
         });
     });
 
-    // Handle chat form submission
-    document.getElementById('chatForm').addEventListener('submit', function(e) {
-        e.preventDefault();
-        console.log('Chat form submitted');
-        const messageInput = this.querySelector('input');
-        const message = messageInput.value.trim();
-        
-        if (message && currentQueryId) {
-            console.log('Sending message for query:', currentQueryId);
-            // Disable input while sending
-            messageInput.disabled = true;
-            const submitButton = this.querySelector('button[type="submit"]');
-            submitButton.disabled = true;
-            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Sending...';
+    // Function to load messages
+    async function loadMessages() {
+        if (!currentQueryId) return;
 
-            fetch('api/send_message.php', {
-                method: 'POST',
+        const token = localStorage.getItem('token');
+        if (!token) {
+            console.error('No token found');
+            window.location.href = 'login.html';
+            return;
+        }
+
+        try {
+            console.log('Loading messages with token:', token.substring(0, 20) + '...');
+            const response = await fetch(`api/get_messages.php?queryId=${currentQueryId}&lastId=${lastMessageId}`, {
+                method: 'GET',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${localStorage.getItem('auth_token')}`
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    queryId: currentQueryId,
-                    message: message
-                })
-            })
-            .then(response => {
-                if (!response.ok) {
-                    throw new Error(`HTTP error! status: ${response.status}`);
+                credentials: 'include'
+            });
+
+            if (response.status === 401) {
+                console.error('Unauthorized access');
+                localStorage.removeItem('token');
+                localStorage.removeItem('user');
+                window.location.href = 'login.html';
+                return;
+            }
+
+            const data = await response.json();
+            console.log('Messages response:', data);
+            
+            if (data.success) {
+                const chatMessages = document.querySelector('#chatModal .chat-messages');
+                if (chatMessages) {
+                    if (data.messages.length === 0 && lastMessageId === 0) {
+                        chatMessages.innerHTML = `
+                            <div class="text-center py-4 text-muted">
+                                <i class="fas fa-comments fa-2x mb-2"></i>
+                                <div>No messages yet. Start the conversation!</div>
+                            </div>
+                        `;
+                    } else {
+                        data.messages.forEach(message => {
+                            if (message.id > lastMessageId) {
+                                const messageElement = createMessageElement(message);
+                                chatMessages.appendChild(messageElement);
+                                lastMessageId = message.id;
+                            }
+                        });
+                    }
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
                 }
-                return response.json();
-            })
-            .then(data => {
-                console.log('Message send response:', data);
+            } else {
+                console.error('Failed to load messages:', data.error);
+                if (data.error === 'Unauthorized access - please log in') {
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    window.location.href = 'login.html';
+                }
+            }
+        } catch (error) {
+            console.error('Error loading messages:', error);
+        }
+    }
+
+    // Function to create message element
+    function createMessageElement(message) {
+        const div = document.createElement('div');
+        const isCurrentUser = message.sender_id === user.id;
+        div.className = `message ${isCurrentUser ? 'sent' : 'received'}`;
+        
+        const content = document.createElement('div');
+        content.className = 'message-content';
+        
+        const header = document.createElement('div');
+        header.className = 'message-header';
+        header.textContent = message.display_name || message.sender_name;
+        
+        const text = document.createElement('div');
+        text.className = 'message-text';
+        text.textContent = message.message;
+        
+        const time = document.createElement('div');
+        time.className = 'message-time';
+        time.textContent = new Date(message.created_at).toLocaleTimeString();
+        
+        content.appendChild(header);
+        content.appendChild(text);
+        content.appendChild(time);
+        div.appendChild(content);
+        
+        return div;
+    }
+
+    // Chat form submission
+    const chatForm = document.getElementById('chatForm');
+    if (chatForm) {
+        chatForm.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const token = localStorage.getItem('token');
+            if (!token) {
+                console.error('No token found');
+                window.location.href = 'login.html';
+                return;
+            }
+
+            const messageInput = document.getElementById('messageInput');
+            const message = messageInput.value.trim();
+            
+            if (!message || !currentQueryId) return;
+
+            try {
+                console.log('Sending message with token:', token.substring(0, 20) + '...');
+                const response = await fetch('api/send_message.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`,
+                        'X-Requested-With': 'XMLHttpRequest'
+                    },
+                    credentials: 'include',
+                    body: JSON.stringify({
+                        query_id: currentQueryId,
+                        message: message
+                    })
+                });
+
+                if (response.status === 401) {
+                    console.error('Unauthorized access');
+                    localStorage.removeItem('token');
+                    localStorage.removeItem('user');
+                    window.location.href = 'login.html';
+                    return;
+                }
+
+                const data = await response.json();
+                console.log('Send message response:', data);
+                
                 if (data.success) {
                     messageInput.value = '';
-                    // The new message will be picked up by the polling
+                    // Reload messages immediately
+                    initializeChat(currentQueryId);
                 } else {
-                    throw new Error(data.error || 'Failed to send message');
+                    console.error('Failed to send message:', data.error);
+                    alert('Failed to send message: ' + (data.error || 'Unknown error'));
                 }
-            })
-            .catch(error => {
+            } catch (error) {
                 console.error('Error sending message:', error);
-                showError('Failed to send message: ' + error.message);
-            })
-            .finally(() => {
-                // Re-enable input
-                messageInput.disabled = false;
-                submitButton.disabled = false;
-                submitButton.innerHTML = 'Send';
-                messageInput.focus();
-            });
-        }
-    });
+                alert('Error sending message. Please try again.');
+            }
+        });
+    }
 
-    // Stop polling when modal is closed
+    // Clean up on modal close
     document.getElementById('chatModal').addEventListener('hidden.bs.modal', function() {
-        console.log('Chat modal closed, stopping polling');
-        if (pollInterval) {
-            clearInterval(pollInterval);
-            pollInterval = null;
+        if (chatInterval) {
+            clearInterval(chatInterval);
+            chatInterval = null;
         }
         currentQueryId = null;
         lastMessageId = 0;
     });
+
+    // Logout functionality
+    const logoutButton = document.querySelector('a[href="logout.php"]');
+    if (logoutButton) {
+        logoutButton.addEventListener('click', function(e) {
+            e.preventDefault();
+            localStorage.removeItem('token');
+            localStorage.removeItem('user');
+            window.location.href = 'login.html';
+        });
+    }
 
     // Handle legal query form submission
     $('#legalQueryForm').on('submit', function(e) {
@@ -299,25 +451,50 @@ $(document).ready(function() {
         e.preventDefault();
         
         const rating = $('.rating .fas.fa-star.active').length;
-        const comment = $('#reviewComment').val();
-        const consultationId = $('#ratingModal').data('consultation-id');
+        const review = $('#reviewText').val().trim();
+        const queryId = $('#ratingQueryId').val();
+        const lawyerId = $('#ratingLawyerId').val();
 
-        $.ajax({
-            url: 'api/submit_review.php',
+        if (!rating) {
+            alert('Please select a rating');
+            return;
+        }
+
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = 'login.html';
+            return;
+        }
+
+        fetch('api/submit-rating.php', {
             method: 'POST',
-            data: {
-                consultation_id: consultationId,
-                rating: rating,
-                comment: comment
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'X-Requested-With': 'XMLHttpRequest'
             },
-            success: function(response) {
-                if (response.success) {
-                    $('#ratingModal').modal('hide');
-                    alert('Thank you for your feedback!');
-                } else {
-                    alert('Error: ' + response.message);
-                }
+            credentials: 'include',
+            body: JSON.stringify({
+                query_id: queryId,
+                lawyer_id: lawyerId,
+                rating: rating,
+                review: review
+            })
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                $('#ratingModal').modal('hide');
+                alert('Thank you for your feedback!');
+                // Refresh the queries list to show the rating
+                location.reload();
+            } else {
+                alert(data.error || 'Failed to submit rating');
             }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Failed to submit rating');
         });
     });
 
@@ -331,9 +508,17 @@ $(document).ready(function() {
                     $(this).addClass('active');
                 }
             });
+            updateRatingText(rating);
         },
         function() {
+            const currentRating = $('#ratingValue').val();
             $('.rating .fa-star').removeClass('active');
+            $('.rating .fa-star').each(function(index) {
+                if (index < currentRating) {
+                    $(this).addClass('active');
+                }
+            });
+            updateRatingText(currentRating);
         }
     );
 
@@ -345,7 +530,25 @@ $(document).ready(function() {
                 $(this).addClass('active');
             }
         });
+        $('#ratingValue').val(rating);
+        updateRatingText(rating);
     });
+
+    function updateRatingText(rating) {
+        const ratingText = $('#ratingText');
+        if (!rating) {
+            ratingText.text('Select your rating');
+            return;
+        }
+        const texts = {
+            1: 'Poor - Not satisfied',
+            2: 'Fair - Could be better',
+            3: 'Good - Met expectations',
+            4: 'Very Good - Exceeded expectations',
+            5: 'Excellent - Outstanding service'
+        };
+        ratingText.text(texts[rating] || 'Select your rating');
+    }
 
     // View query details and load chat
     $('.view-query').click(function() {

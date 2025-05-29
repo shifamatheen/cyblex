@@ -1,97 +1,108 @@
 <?php
-require_once '../config/database.php';
+// Start output buffering
+ob_start();
 
-// Enable error reporting
+// Set error reporting
 error_reporting(E_ALL);
-ini_set('display_errors', 1);
+ini_set('display_errors', 0);
 
-// Start session if not already started
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
+// Set content type
+header('Content-Type: application/json');
+
+// Function to output JSON response
+function jsonResponse($data, $status = 200) {
+    ob_clean();
+    http_response_code($status);
+    echo json_encode($data);
+    exit();
 }
 
-// Log session data for debugging
-error_log("Session data: " . print_r($_SESSION, true));
-
 try {
-    // Check if user is logged in
-    if (!isset($_SESSION['user_id'])) {
-        error_log("User not logged in");
-        http_response_code(401);
-        echo json_encode(['error' => 'Not logged in']);
-        exit;
+    // Start session
+    if (session_status() === PHP_SESSION_NONE) {
+        session_start();
     }
 
-    // Check if user is admin
-    if (!isset($_SESSION['user_type']) || $_SESSION['user_type'] !== 'admin') {
-        error_log("User is not an admin. User type: " . $_SESSION['user_type']);
-        http_response_code(403);
-        echo json_encode(['error' => 'Not authorized']);
-        exit;
+    // Include required files
+    require_once '../config/database.php';
+    require_once '../config/auth.php';
+
+    // Check admin access
+    if (!isAdmin()) {
+        jsonResponse(['error' => 'Admin access required'], 403);
     }
 
     // Get database connection
     $db = Database::getInstance();
     $conn = $db->getConnection();
-    
-    // Test the connection
-    if (!$conn) {
-        error_log("Database connection failed");
-        throw new Exception("Database connection failed");
-    }
-    
-    // Log the SQL query for debugging
-    $sql = "
+
+    // First, check total number of lawyers
+    $stmt = $conn->query("SELECT COUNT(*) as total FROM users WHERE user_type = 'lawyer'");
+    $totalLawyers = $stmt->fetch(PDO::FETCH_ASSOC)['total'];
+
+    // Check pending lawyers
+    $stmt = $conn->query("SELECT COUNT(*) as pending FROM users WHERE user_type = 'lawyer' AND status = 'pending'");
+    $pendingLawyers = $stmt->fetch(PDO::FETCH_ASSOC)['pending'];
+
+    // Get pending verifications with more detailed information
+    $stmt = $conn->prepare("
         SELECT 
-            lv.lawyer_id,
+            u.id as lawyer_id,
             u.full_name,
             u.email,
-            lv.specialization,
+            u.profile_image,
+            u.status as user_status,
+            l.specialization,
+            l.experience_years,
+            l.bar_council_number,
+            lv.id as verification_id,
+            lv.status as verification_status,
+            lv.document_path,
+            lv.admin_notes,
             lv.submitted_at,
-            lv.status
-        FROM lawyer_verifications lv
-        JOIN users u ON lv.lawyer_id = u.id
-        WHERE lv.status = 'pending'
-    ";
-    error_log("Executing SQL query: " . $sql);
-    
-    // Execute query
-    $result = $conn->query($sql);
-    
-    if ($result === false) {
-        error_log("Query failed: " . print_r($conn->errorInfo(), true));
-        throw new Exception("Query failed: " . implode(" ", $conn->errorInfo()));
-    }
-    
-    // Fetch results
-    $verifications = $result->fetchAll(PDO::FETCH_ASSOC);
-    error_log("Query results: " . print_r($verifications, true));
-    
-    // Return results
-    header('Content-Type: application/json');
-    echo json_encode([
+            lv.verified_at,
+            lv.verified_by
+        FROM users u
+        LEFT JOIN lawyers l ON u.id = l.user_id
+        LEFT JOIN lawyer_verifications lv ON u.id = lv.lawyer_id
+        WHERE u.user_type = 'lawyer' 
+        AND (
+            (u.status = 'pending' AND lv.id IS NULL)
+            OR 
+            (lv.status = 'pending')
+        )
+        ORDER BY 
+            CASE 
+                WHEN lv.id IS NULL THEN 1 
+                ELSE 0 
+            END,
+            lv.submitted_at DESC
+    ");
+    $stmt->execute();
+    $verifications = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Return success response with additional information
+    jsonResponse([
         'success' => true,
-        'verifications' => $verifications
+        'data' => $verifications,
+        'stats' => [
+            'total_lawyers' => $totalLawyers,
+            'pending_lawyers' => $pendingLawyers,
+            'pending_verifications' => count($verifications)
+        ]
     ]);
 
 } catch (PDOException $e) {
     error_log("Database error: " . $e->getMessage());
-    error_log("Error code: " . $e->getCode());
-    error_log("Error info: " . print_r($e->errorInfo, true));
-    
-    http_response_code(500);
-    echo json_encode([
-        'error' => 'Database error',
-        'message' => $e->getMessage(),
-        'code' => $e->getCode()
-    ]);
+    jsonResponse([
+        'error' => 'Database error occurred',
+        'message' => $e->getMessage()
+    ], 500);
 } catch (Exception $e) {
     error_log("General error: " . $e->getMessage());
-    
-    http_response_code(500);
-    echo json_encode([
-        'error' => 'Server error',
+    jsonResponse([
+        'error' => 'Server error occurred',
         'message' => $e->getMessage()
-    ]);
+    ], 500);
 }
 ?> 

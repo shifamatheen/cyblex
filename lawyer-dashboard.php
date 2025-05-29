@@ -33,6 +33,13 @@ $conn = $db->getConnection();
 
 // Get lawyer information
 try {
+    // First check if the status column exists in lawyers table
+    $checkColumn = $conn->query("SHOW COLUMNS FROM lawyers LIKE 'status'");
+    if ($checkColumn->rowCount() == 0) {
+        // Add status column if it doesn't exist
+        $conn->exec("ALTER TABLE lawyers ADD COLUMN status ENUM('pending', 'active', 'suspended') DEFAULT 'pending'");
+    }
+
     $stmt = $conn->prepare("
         SELECT 
             u.*, 
@@ -40,7 +47,8 @@ try {
             l.experience_years,
             l.hourly_rate,
             l.languages,
-            COALESCE(lv.status, 'pending') as verification_status
+            COALESCE(lv.status, 'pending') as verification_status,
+            COALESCE(l.status, 'pending') as status
         FROM users u 
         LEFT JOIN lawyers l ON u.id = l.user_id 
         LEFT JOIN lawyer_verifications lv ON l.id = lv.lawyer_id 
@@ -58,8 +66,9 @@ try {
                 experience_years, 
                 bar_council_number, 
                 hourly_rate, 
-                languages
-            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en')
+                languages,
+                status
+            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en', 'pending')
         ");
         $stmt->execute([$_SESSION['user_id']]);
         
@@ -71,7 +80,8 @@ try {
                 l.experience_years,
                 l.hourly_rate,
                 l.languages,
-                'pending' as verification_status
+                'pending' as verification_status,
+                l.status
             FROM users u 
             JOIN lawyers l ON u.id = l.user_id 
             WHERE u.id = ?
@@ -93,6 +103,7 @@ try {
             hourly_rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
             languages VARCHAR(100) NOT NULL DEFAULT 'en',
             bio TEXT,
+            status ENUM('pending', 'active', 'suspended') DEFAULT 'pending',
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )";
         $conn->exec($sql);
@@ -105,8 +116,9 @@ try {
                 experience_years, 
                 bar_council_number, 
                 hourly_rate, 
-                languages
-            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en')
+                languages,
+                status
+            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en', 'pending')
         ");
         $stmt->execute([$_SESSION['user_id']]);
         
@@ -118,7 +130,8 @@ try {
                 l.experience_years,
                 l.hourly_rate,
                 l.languages,
-                'pending' as verification_status
+                'pending' as verification_status,
+                l.status
             FROM users u 
             JOIN lawyers l ON u.id = l.user_id 
             WHERE u.id = ?
@@ -211,6 +224,9 @@ try {
 
 // Get accepted queries
 try {
+    // Debug: Log the lawyer's user ID
+    error_log("Fetching accepted queries for lawyer user_id: " . $_SESSION['user_id']);
+    
     $stmt = $conn->prepare("
         SELECT lq.*, u.full_name as client_name
         FROM legal_queries lq
@@ -227,6 +243,14 @@ try {
     ");
     $stmt->execute([$_SESSION['user_id']]);
     $accepted_queries = $stmt->fetchAll();
+    
+    // Debug: Log the number of queries found
+    error_log("Found " . count($accepted_queries) . " accepted queries");
+    
+    // Debug: Log details of each query
+    foreach ($accepted_queries as $query) {
+        error_log("Query ID: " . $query['id'] . ", Status: " . $query['status'] . ", Title: " . $query['title']);
+    }
 } catch (PDOException $e) {
     error_log("Error fetching accepted queries: " . $e->getMessage());
     $accepted_queries = [];
@@ -351,12 +375,7 @@ try {
             color: var(--light-text);
         }
 
-        .status-completed {
-            background-color: var(--secondary-color);
-            color: var(--light-text);
-        }
-
-        .status-cancelled {
+        .status-suspended {
             background-color: var(--danger-color);
             color: var(--light-text);
         }
@@ -411,6 +430,81 @@ try {
             font-weight: 600;
             color: var(--secondary-color);
         }
+
+        .chat-messages {
+            background-color: #f8f9fa;
+        }
+
+        .message {
+            margin-bottom: 1rem;
+            max-width: 80%;
+        }
+
+        .message.sent {
+            margin-left: auto;
+        }
+
+        .message.received {
+            margin-right: auto;
+        }
+
+        .message-content {
+            padding: 0.75rem 1rem;
+            border-radius: 1rem;
+            position: relative;
+        }
+
+        .message.sent .message-content {
+            background-color: #007bff;
+            color: white;
+            border-bottom-right-radius: 0.25rem;
+        }
+
+        .message.received .message-content {
+            background-color: #e9ecef;
+            color: #212529;
+            border-bottom-left-radius: 0.25rem;
+        }
+
+        .message-header {
+            font-size: 0.875rem;
+            margin-bottom: 0.25rem;
+        }
+
+        .message.sent .message-header {
+            color: #e9ecef;
+        }
+
+        .message.received .message-header {
+            color: #6c757d;
+        }
+
+        .message-time {
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+
+        .message-text {
+            word-wrap: break-word;
+        }
+
+        .alert {
+            margin-bottom: 1.5rem;
+            border-radius: 8px;
+            border: none;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+        }
+
+        .alert-warning {
+            background-color: #fff3cd;
+            color: #856404;
+            border-left: 4px solid #ffeeba;
+        }
+
+        .alert p {
+            margin-top: 0.5rem;
+            margin-bottom: 0;
+        }
     </style>
 </head>
 <body>
@@ -427,7 +521,9 @@ try {
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
                     <li class="nav-item"><a class="nav-link active" href="#pending">Pending Queries</a></li>
+                    <?php if ($lawyer['status'] === 'active'): ?>
                     <li class="nav-item"><a class="nav-link" href="#chat">Chat</a></li>
+                    <?php endif; ?>
                     <li class="nav-item"><a class="nav-link" href="#templates">Templates</a></li>
                     <li class="nav-item"><a class="nav-link" href="#profile">Profile</a></li>
                     <li class="nav-item"><a class="nav-link" href="#ratings">Ratings</a></li>
@@ -437,7 +533,7 @@ try {
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
                             <i class="fas fa-user-circle"></i>
-                            <span id="userName">Loading...</span>
+                            <span id="userName"><?= htmlspecialchars($lawyer['full_name']) ?></span>
                         </a>
                         <div class="dropdown-menu dropdown-menu-end">
                             <a class="dropdown-item" href="#"><i class="fas fa-cog"></i> Settings</a>
@@ -453,6 +549,15 @@ try {
     </nav>
 
     <div class="main-content">
+        <?php if ($lawyer['status'] !== 'active'): ?>
+        <div class="alert alert-warning alert-dismissible fade show" role="alert">
+            <i class="fas fa-exclamation-triangle me-2"></i>
+            <strong>Account Pending Approval</strong>
+            <p class="mb-0">Your account is currently pending approval. You will be able to access chat and other features once your account is approved by our admin team.</p>
+            <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+        </div>
+        <?php endif; ?>
+
         <!-- Quick Stats -->
         <div class="row mb-4">
             <div class="col-md-3">
@@ -461,6 +566,7 @@ try {
                     <div class="value"><?= $pending_count ?></div>
                 </div>
             </div>
+            <?php if ($lawyer['status'] === 'active'): ?>
             <div class="col-md-3">
                 <div class="stats-card">
                     <h4><i class="fas fa-comments"></i> Active Chats</h4>
@@ -470,7 +576,42 @@ try {
             <div class="col-md-3">
                 <div class="stats-card">
                     <h4><i class="fas fa-star"></i> Average Rating</h4>
-                    <div class="value"><?= $avg_rating ?></div>
+                    <div class="value">
+                        <?php if ($avg_rating > 0): ?>
+                            <div class="d-flex align-items-center justify-content-center">
+                                <span class="h2 mb-0"><?= number_format($avg_rating, 1) ?></span>
+                                <div class="ms-2">
+                                    <?php
+                                    $fullStars = floor($avg_rating);
+                                    $halfStar = $avg_rating - $fullStars >= 0.5;
+                                    for ($i = 1; $i <= 5; $i++) {
+                                        if ($i <= $fullStars) {
+                                            echo '<i class="fas fa-star text-warning"></i>';
+                                        } elseif ($i == $fullStars + 1 && $halfStar) {
+                                            echo '<i class="fas fa-star-half-alt text-warning"></i>';
+                                        } else {
+                                            echo '<i class="far fa-star text-warning"></i>';
+                                        }
+                                    }
+                                    ?>
+                                </div>
+                            </div>
+                            <small class="text-muted">
+                                <?php
+                                $stmt = $conn->prepare("
+                                    SELECT COUNT(*) as count 
+                                    FROM ratings 
+                                    WHERE lawyer_id = ?
+                                ");
+                                $stmt->execute([$_SESSION['user_id']]);
+                                $rating_count = $stmt->fetch()['count'];
+                                echo $rating_count . ' ' . ($rating_count == 1 ? 'rating' : 'ratings');
+                                ?>
+                            </small>
+                        <?php else: ?>
+                            <span class="text-muted">No ratings yet</span>
+                        <?php endif; ?>
+                    </div>
                 </div>
             </div>
             <div class="col-md-3">
@@ -479,6 +620,7 @@ try {
                     <div class="value"><?= $avg_response_time ?>h</div>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
 
         <!-- Main Sections -->
@@ -525,9 +667,11 @@ try {
                                             <button class="btn btn-sm btn-primary view-query" data-id="<?= $query['id'] ?>">
                                                 <i class="fas fa-eye"></i> View
                                             </button>
+                                            <?php if ($lawyer['status'] === 'active'): ?>
                                             <button class="btn btn-sm btn-success accept-query" data-id="<?= $query['id'] ?>">
                                                 <i class="fas fa-check"></i> Accept
                                             </button>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                     <?php endforeach; ?>
@@ -537,6 +681,7 @@ try {
                     <?php endif; ?>
                 </section>
 
+                <?php if ($lawyer['status'] === 'active'): ?>
                 <!-- Accepted Legal Queries -->
                 <section id="accepted" class="section-card">
                     <h3><i class="fas fa-check-circle"></i> Accepted Queries</h3>
@@ -593,6 +738,11 @@ try {
                                             <button class="btn btn-sm btn-success start-chat" data-id="<?= $query['id'] ?>">
                                                 <i class="fas fa-comments"></i> Chat
                                             </button>
+                                            <?php if ($query['status'] === 'in_progress'): ?>
+                                            <button class="btn btn-sm btn-info complete-query" data-id="<?= $query['id'] ?>">
+                                                <i class="fas fa-check-circle"></i> Complete
+                                            </button>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                     <?php endforeach; ?>
@@ -609,6 +759,7 @@ try {
                         <!-- Chat interface will be loaded here -->
                     </div>
                 </section>
+                <?php endif; ?>
             </div>
 
             <div class="col-md-4">
@@ -616,17 +767,20 @@ try {
                 <section id="profile" class="section-card">
                     <h3><i class="fas fa-user-cog"></i>Profile Status</h3>
                     <div class="verification-status mb-3">
-                        <span class="status-badge status-<?= $lawyer['verification_status'] ?>">
-                            <?= ucfirst($lawyer['verification_status']) ?> Verification
+                        <span class="status-badge status-<?= $lawyer['status'] ?>">
+                            <?= ucfirst($lawyer['status']) ?> Verification
                         </span>
                     </div>
                     <div class="profile-info">
                         <p><strong>Specialization:</strong> <span id="specialization"><?= htmlspecialchars($lawyer['specialization']) ?></span></p>
                         <p><strong>Experience:</strong> <span id="experience"><?= htmlspecialchars($lawyer['experience_years']) ?></span> years</p>
+                        <?php if ($lawyer['status'] === 'active'): ?>
                         <p><strong>Rating:</strong> <span id="rating"><?= $avg_rating ?></span></p>
+                        <?php endif; ?>
                     </div>
                 </section>
 
+                <?php if ($lawyer['status'] === 'active'): ?>
                 <!-- Quick Actions -->
                 <section class="section-card">
                     <h3><i class="fas fa-bolt"></i>Quick Actions</h3>
@@ -639,6 +793,7 @@ try {
                         </button>
                     </div>
                 </section>
+                <?php endif; ?>
             </div>
         </div>
     </div>
@@ -677,18 +832,22 @@ try {
     <div class="modal fade" id="chatModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
-                <div class="modal-header">
+                <div class="modal-header bg-primary text-white">
                     <h5 class="modal-title">Chat</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="chat-messages" style="height: 400px; overflow-y: auto; margin-bottom: 1rem;">
+                <div class="modal-body p-0">
+                    <div class="chat-messages p-3" style="height: 400px; overflow-y: auto;">
                         <!-- Messages will be loaded here -->
                     </div>
-                    <form id="chatForm" class="d-flex">
-                        <input type="text" class="form-control me-2" placeholder="Type your message...">
-                        <button type="submit" class="btn btn-primary">Send</button>
-                    </form>
+                    <div class="chat-input p-3 border-top">
+                        <form id="chatForm" class="d-flex gap-2">
+                            <input type="text" id="messageInput" name="message" class="form-control" placeholder="Type your message..." required>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-paper-plane"></i> Send
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>

@@ -150,6 +150,51 @@ $legal_queries = $stmt->fetchAll();
         .rating-stars .fa-star:hover ~ .fa-star {
             color: #ddd;
         }
+        .chat-messages {
+            background-color: #f8f9fa;
+        }
+        .message {
+            margin-bottom: 1rem;
+            max-width: 80%;
+        }
+        .message.sent {
+            margin-left: auto;
+        }
+        .message.received {
+            margin-right: auto;
+        }
+        .message-content {
+            padding: 0.75rem 1rem;
+            border-radius: 1rem;
+            position: relative;
+        }
+        .message.sent .message-content {
+            background-color: #007bff;
+            color: white;
+            border-bottom-right-radius: 0.25rem;
+        }
+        .message.received .message-content {
+            background-color: #e9ecef;
+            color: #212529;
+            border-bottom-left-radius: 0.25rem;
+        }
+        .message-header {
+            font-size: 0.875rem;
+            margin-bottom: 0.25rem;
+        }
+        .message.sent .message-header {
+            color: #e9ecef;
+        }
+        .message.received .message-header {
+            color: #6c757d;
+        }
+        .message-time {
+            font-size: 0.75rem;
+            opacity: 0.8;
+        }
+        .message-text {
+            word-wrap: break-word;
+        }
     </style>
 </head>
 <body class="bg-light">
@@ -400,36 +445,89 @@ $legal_queries = $stmt->fetchAll();
                             
                             <div class="mb-3">
                                 <label for="reviewText" class="form-label">Your Review (Optional)</label>
-                                <textarea class="form-control" id="reviewText" name="review" rows="4" 
-                                        placeholder="Share your experience with this advisor..."></textarea>
+                                <textarea class="form-control" id="reviewText" name="review" rows="3" 
+                                    placeholder="Share your experience with this lawyer..."></textarea>
                             </div>
                         </form>
                     </div>
                     <div class="modal-footer">
-                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
-                        <button type="button" class="btn btn-primary" id="submitRating">Submit Rating</button>
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-primary" id="submitRatingBtn">Submit Rating</button>
                     </div>
                 </div>
             </div>
         </div>
+
+        <!-- Rating History Section -->
+        <section class="rating-history mb-4">
+            <h3>Your Ratings</h3>
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Query Title</th>
+                            <th>Lawyer</th>
+                            <th>Rating</th>
+                            <th>Review</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php
+                        $stmt = $conn->prepare("
+                            SELECT r.*, lq.title as query_title, u.full_name as lawyer_name
+                            FROM ratings r
+                            JOIN legal_queries lq ON r.query_id = lq.id
+                            JOIN lawyers l ON r.lawyer_id = l.id
+                            JOIN users u ON l.user_id = u.id
+                            WHERE lq.client_id = ?
+                            ORDER BY r.created_at DESC
+                        ");
+                        $stmt->execute([$_SESSION['user_id']]);
+                        $ratings = $stmt->fetchAll();
+                        
+                        foreach ($ratings as $rating):
+                        ?>
+                        <tr>
+                            <td><?= htmlspecialchars($rating['query_title']) ?></td>
+                            <td><?= htmlspecialchars($rating['lawyer_name']) ?></td>
+                            <td>
+                                <?php
+                                for ($i = 1; $i <= 5; $i++) {
+                                    echo '<i class="fas fa-star ' . ($i <= $rating['rating'] ? 'text-warning' : 'text-muted') . '"></i>';
+                                }
+                                ?>
+                            </td>
+                            <td><?= htmlspecialchars($rating['review'] ?? 'No review') ?></td>
+                            <td><?= date('Y-m-d', strtotime($rating['created_at'])) ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
     </div>
 
     <!-- Chat Modal -->
     <div class="modal fade" id="chatModal" tabindex="-1">
         <div class="modal-dialog modal-lg">
             <div class="modal-content">
-                <div class="modal-header">
+                <div class="modal-header bg-primary text-white">
                     <h5 class="modal-title">Chat</h5>
-                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
-                <div class="modal-body">
-                    <div class="chat-messages" style="height: 400px; overflow-y: auto; margin-bottom: 1rem;">
+                <div class="modal-body p-0">
+                    <div class="chat-messages p-3" style="height: 400px; overflow-y: auto;">
                         <!-- Messages will be loaded here -->
                     </div>
-                    <form id="chatForm" class="d-flex">
-                        <input type="text" class="form-control me-2" placeholder="Type your message...">
-                        <button type="submit" class="btn btn-primary">Send</button>
-                    </form>
+                    <div class="chat-input p-3 border-top">
+                        <form id="chatForm" class="d-flex gap-2">
+                            <input type="text" id="messageInput" name="message" class="form-control" placeholder="Type your message..." required>
+                            <button type="submit" class="btn btn-primary">
+                                <i class="fas fa-paper-plane"></i> Send
+                            </button>
+                        </form>
+                    </div>
                 </div>
             </div>
         </div>
@@ -467,7 +565,7 @@ $legal_queries = $stmt->fetchAll();
         const ratingValue = document.getElementById('ratingValue');
         const ratingText = document.getElementById('ratingText');
         const ratingForm = document.getElementById('ratingForm');
-        const submitRatingBtn = document.getElementById('submitRating');
+        const submitRatingBtn = document.getElementById('submitRatingBtn');
         
         // Star rating interaction
         ratingStars.forEach(star => {
