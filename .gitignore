@@ -1,0 +1,36 @@
+# Environment variables
+.env
+
+# Logs
+*.log
+logs/
+websocket_server.log
+
+# Dependencies
+/vendor/
+/node_modules/
+
+# IDE files
+.idea/
+.vscode/
+*.sublime-workspace
+*.sublime-project
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Cache files
+*.cache
+.cache/ 
