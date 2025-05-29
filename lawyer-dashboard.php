@@ -1,0 +1,723 @@
+<?php
+session_start();
+require_once 'config/database.php';
+
+// Check if user is logged in and is a lawyer
+if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_type']) || $_SESSION['user_type'] !== 'lawyer') {
+    // If session is not set, check for token in URL
+    if (isset($_GET['token'])) {
+        try {
+            $token = $_GET['token'];
+            $tokenParts = explode('.', $token);
+            $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $tokenParts[1])), true);
+            if ($payload && isset($payload['user_id']) && isset($payload['user_type']) && $payload['user_type'] === 'lawyer') {
+                $_SESSION['user_id'] = $payload['user_id'];
+                $_SESSION['user_type'] = $payload['user_type'];
+                $_SESSION['username'] = $payload['username'];
+            } else {
+                header('Location: login.html');
+                exit();
+            }
+        } catch (Exception $e) {
+            header('Location: login.html');
+            exit();
+        }
+    } else {
+        header('Location: login.html');
+        exit();
+    }
+}
+
+$db = Database::getInstance();
+$conn = $db->getConnection();
+
+// Get lawyer information
+try {
+    $stmt = $conn->prepare("
+        SELECT 
+            u.*, 
+            l.specialization,
+            l.experience_years,
+            l.hourly_rate,
+            l.languages,
+            COALESCE(lv.status, 'pending') as verification_status
+        FROM users u 
+        LEFT JOIN lawyers l ON u.id = l.user_id 
+        LEFT JOIN lawyer_verifications lv ON l.id = lv.lawyer_id 
+        WHERE u.id = ?
+    ");
+    $stmt->execute([$_SESSION['user_id']]);
+    $lawyer = $stmt->fetch();
+
+    // If lawyer profile doesn't exist, create one
+    if (!$lawyer['specialization']) {
+        $stmt = $conn->prepare("
+            INSERT INTO lawyers (
+                user_id, 
+                specialization, 
+                experience_years, 
+                bar_council_number, 
+                hourly_rate, 
+                languages
+            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en')
+        ");
+        $stmt->execute([$_SESSION['user_id']]);
+        
+        // Fetch the updated lawyer information
+        $stmt = $conn->prepare("
+            SELECT 
+                u.*, 
+                l.specialization,
+                l.experience_years,
+                l.hourly_rate,
+                l.languages,
+                'pending' as verification_status
+            FROM users u 
+            JOIN lawyers l ON u.id = l.user_id 
+            WHERE u.id = ?
+        ");
+        $stmt->execute([$_SESSION['user_id']]);
+        $lawyer = $stmt->fetch();
+    }
+} catch (PDOException $e) {
+    error_log("Error in lawyer-dashboard.php: " . $e->getMessage());
+    // If table doesn't exist, create it
+    if ($e->getCode() == '42S02') { // Table doesn't exist error code
+        $sql = "CREATE TABLE IF NOT EXISTS lawyers (
+            id INT(11) AUTO_INCREMENT PRIMARY KEY,
+            user_id INT(11) NOT NULL,
+            specialization VARCHAR(100) NOT NULL,
+            experience_years INT(11) NOT NULL DEFAULT 0,
+            bar_council_number VARCHAR(50) NOT NULL,
+            verification_status ENUM('pending', 'verified', 'rejected') DEFAULT 'pending',
+            hourly_rate DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+            languages VARCHAR(100) NOT NULL DEFAULT 'en',
+            bio TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )";
+        $conn->exec($sql);
+        
+        // Insert default lawyer record
+        $stmt = $conn->prepare("
+            INSERT INTO lawyers (
+                user_id, 
+                specialization, 
+                experience_years, 
+                bar_council_number, 
+                hourly_rate, 
+                languages
+            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en')
+        ");
+        $stmt->execute([$_SESSION['user_id']]);
+        
+        // Try the query again
+        $stmt = $conn->prepare("
+            SELECT 
+                u.*, 
+                l.specialization,
+                l.experience_years,
+                l.hourly_rate,
+                l.languages,
+                'pending' as verification_status
+            FROM users u 
+            JOIN lawyers l ON u.id = l.user_id 
+            WHERE u.id = ?
+        ");
+        $stmt->execute([$_SESSION['user_id']]);
+        $lawyer = $stmt->fetch();
+    } else {
+        throw $e; // Re-throw if it's a different error
+    }
+}
+
+// Get lawyer statistics
+try {
+    // Get pending queries count
+    $stmt = $conn->prepare("
+        SELECT COUNT(*) as count 
+        FROM legal_queries 
+        WHERE status = 'pending'
+    ");
+    $stmt->execute();
+    $pending_count = $stmt->fetch()['count'];
+
+    // Get active chats count
+    $stmt = $conn->prepare("
+        SELECT COUNT(DISTINCT lq.id) as count 
+        FROM legal_queries lq
+        JOIN lawyers l ON lq.lawyer_id = l.id
+        WHERE l.user_id = ? AND lq.status IN ('assigned', 'in_progress')
+    ");
+    $stmt->execute([$_SESSION['user_id']]);
+    $active_chats = $stmt->fetch()['count'];
+
+    // Get average rating
+    $stmt = $conn->prepare("
+        SELECT COALESCE(AVG(r.rating), 0) as avg_rating
+        FROM reviews r
+        JOIN legal_queries lq ON r.query_id = lq.id
+        JOIN lawyers l ON lq.lawyer_id = l.id
+        WHERE l.user_id = ?
+    ");
+    $stmt->execute([$_SESSION['user_id']]);
+    $avg_rating = round($stmt->fetch()['avg_rating'], 1);
+
+    // Get average response time (in hours)
+    $stmt = $conn->prepare("
+        SELECT COALESCE(AVG(TIMESTAMPDIFF(HOUR, lq.created_at, m.created_at)), 0) as avg_response_time
+        FROM legal_queries lq
+        JOIN messages m ON lq.id = m.query_id
+        JOIN lawyers l ON lq.lawyer_id = l.id
+        WHERE l.user_id = ? AND m.sender_id = l.user_id
+    ");
+    $stmt->execute([$_SESSION['user_id']]);
+    $avg_response_time = round($stmt->fetch()['avg_response_time'], 1);
+
+} catch (PDOException $e) {
+    error_log("Error fetching lawyer statistics: " . $e->getMessage());
+    $pending_count = 0;
+    $active_chats = 0;
+    $avg_rating = 0;
+    $avg_response_time = 0;
+}
+
+// Get pending legal queries
+try {
+    // First check if the legal_queries table exists
+    $tableCheck = $conn->query("SHOW TABLES LIKE 'legal_queries'");
+    if ($tableCheck->rowCount() == 0) {
+        throw new PDOException("legal_queries table does not exist");
+    }
+
+    $stmt = $conn->prepare("
+        SELECT lq.*, u.full_name as client_name
+        FROM legal_queries lq
+        JOIN users u ON lq.client_id = u.id
+        WHERE lq.status = 'pending'
+        ORDER BY 
+            CASE lq.urgency_level
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                WHEN 'low' THEN 3
+            END,
+            lq.created_at ASC
+    ");
+    $stmt->execute();
+    $pending_queries = $stmt->fetchAll();
+} catch (PDOException $e) {
+    error_log("Database error in lawyer-dashboard.php: " . $e->getMessage());
+    $pending_queries = [];
+}
+
+// Get accepted queries
+try {
+    $stmt = $conn->prepare("
+        SELECT lq.*, u.full_name as client_name
+        FROM legal_queries lq
+        JOIN users u ON lq.client_id = u.id
+        JOIN lawyers l ON lq.lawyer_id = l.id
+        WHERE l.user_id = ? AND lq.status IN ('assigned', 'in_progress')
+        ORDER BY 
+            CASE lq.urgency_level
+                WHEN 'high' THEN 1
+                WHEN 'medium' THEN 2
+                WHEN 'low' THEN 3
+            END,
+            lq.created_at ASC
+    ");
+    $stmt->execute([$_SESSION['user_id']]);
+    $accepted_queries = $stmt->fetchAll();
+} catch (PDOException $e) {
+    error_log("Error fetching accepted queries: " . $e->getMessage());
+    $accepted_queries = [];
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Lawyer Dashboard - Cyblex</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Custom CSS -->
+    <link href="css/style.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --success-color: #2ecc71;
+            --warning-color: #f1c40f;
+            --danger-color: #e74c3c;
+            --light-bg: #f8f9fa;
+            --dark-text: #2c3e50;
+            --light-text: #ffffff;
+            --border-color: #e9ecef;
+        }
+
+        body {
+            background-color: var(--light-bg);
+            color: var(--dark-text);
+        }
+
+        .navbar {
+            background-color: var(--light-text) !important;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .navbar-brand {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .navbar-brand span {
+            font-size: 1.2rem;
+            font-weight: 500;
+            color: var(--dark-text);
+        }
+
+        .nav-link {
+            color: var(--dark-text) !important;
+            transition: color 0.2s;
+            padding: 0.5rem 1rem;
+        }
+
+        .nav-link:hover, .nav-link.active {
+            color: var(--secondary-color) !important;
+            background-color: rgba(52, 152, 219, 0.1);
+            border-radius: 4px;
+        }
+
+        .dropdown-menu {
+            border: none;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+
+        .dropdown-item {
+            padding: 0.5rem 1rem;
+        }
+
+        .dropdown-item i {
+            width: 20px;
+            text-align: center;
+            margin-right: 8px;
+        }
+
+        .section-card {
+            background: var(--light-text);
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            border: 1px solid var(--border-color);
+        }
+
+        .section-card h3 {
+            color: var(--primary-color);
+            margin-bottom: 1.5rem;
+            font-size: 1.5rem;
+            font-weight: 600;
+            border-bottom: 2px solid var(--border-color);
+            padding-bottom: 0.5rem;
+        }
+
+        .section-card h3 i {
+            margin-right: 0.5rem;
+            color: var(--secondary-color);
+        }
+
+        .main-content {
+            margin-top: 80px;
+            padding: 20px;
+        }
+
+        .status-badge {
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .status-pending {
+            background-color: var(--warning-color);
+            color: var(--dark-text);
+        }
+
+        .status-active {
+            background-color: var(--success-color);
+            color: var(--light-text);
+        }
+
+        .status-completed {
+            background-color: var(--secondary-color);
+            color: var(--light-text);
+        }
+
+        .status-cancelled {
+            background-color: var(--danger-color);
+            color: var(--light-text);
+        }
+
+        .action-button {
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: all 0.2s;
+        }
+
+        .action-button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .action-button-primary {
+            background-color: var(--secondary-color);
+            color: var(--light-text);
+            border: none;
+        }
+
+        .action-button-secondary {
+            background-color: var(--light-text);
+            color: var(--secondary-color);
+            border: 1px solid var(--secondary-color);
+        }
+
+        .stats-card {
+            background: var(--light-text);
+            border-radius: 8px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border: 1px solid var(--border-color);
+            transition: transform 0.2s;
+        }
+
+        .stats-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .stats-card h4 {
+            color: var(--primary-color);
+            font-size: 1.1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .stats-card .value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--secondary-color);
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-light fixed-top">
+        <div class="container">
+            <a class="navbar-brand" href="index.html">
+                <img src="assets/images/logo.svg" alt="Cyblex Logo" height="40">
+                <span>Lawyer Dashboard</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item"><a class="nav-link active" href="#pending">Pending Queries</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#chat">Chat</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#templates">Templates</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#profile">Profile</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#ratings">Ratings</a></li>
+                    <li class="nav-item"><a class="nav-link" href="#history">History & Stats</a></li>
+                </ul>
+                <div class="d-flex align-items-center">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-user-circle"></i>
+                            <span id="userName">Loading...</span>
+                        </a>
+                        <div class="dropdown-menu dropdown-menu-end">
+                            <a class="dropdown-item" href="#"><i class="fas fa-cog"></i> Settings</a>
+                            <div class="dropdown-divider"></div>
+                            <a class="dropdown-item text-danger" href="logout.php">
+                                <i class="fas fa-sign-out-alt"></i> Logout
+                            </a>
+                        </div>
+                    </li>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="main-content">
+        <!-- Quick Stats -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h4><i class="fas fa-clipboard-list"></i> Pending Queries</h4>
+                    <div class="value"><?= $pending_count ?></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h4><i class="fas fa-comments"></i> Active Chats</h4>
+                    <div class="value"><?= $active_chats ?></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h4><i class="fas fa-star"></i> Average Rating</h4>
+                    <div class="value"><?= $avg_rating ?></div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="stats-card">
+                    <h4><i class="fas fa-clock"></i> Response Time</h4>
+                    <div class="value"><?= $avg_response_time ?>h</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Sections -->
+        <div class="row">
+            <div class="col-md-8">
+                <!-- Pending Legal Queries -->
+                <section id="pending" class="section-card">
+                    <h3><i class="fas fa-clock"></i> Pending Queries</h3>
+                    <?php if (empty($pending_queries)): ?>
+                        <div class="alert alert-info">No pending queries at the moment.</div>
+                    <?php else: ?>
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Client</th>
+                                        <th>Category</th>
+                                        <th>Title</th>
+                                        <th>Urgency</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($pending_queries as $query): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars($query['client_name']) ?></td>
+                                        <td><?= htmlspecialchars($query['category']) ?></td>
+                                        <td><?= htmlspecialchars($query['title']) ?></td>
+                                        <td>
+                                            <span class="badge bg-<?php 
+                                                echo match($query['urgency_level']) {
+                                                    'high' => 'danger',
+                                                    'medium' => 'warning',
+                                                    'low' => 'success',
+                                                    default => 'secondary'
+                                                };
+                                            ?>">
+                                                <?= ucfirst($query['urgency_level']) ?>
+                                            </span>
+                                        </td>
+                                        <td><?= date('Y-m-d', strtotime($query['created_at'])) ?></td>
+                                        <td>
+                                            <button class="btn btn-sm btn-primary view-query" data-id="<?= $query['id'] ?>">
+                                                <i class="fas fa-eye"></i> View
+                                            </button>
+                                            <button class="btn btn-sm btn-success accept-query" data-id="<?= $query['id'] ?>">
+                                                <i class="fas fa-check"></i> Accept
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </section>
+
+                <!-- Accepted Legal Queries -->
+                <section id="accepted" class="section-card">
+                    <h3><i class="fas fa-check-circle"></i> Accepted Queries</h3>
+                    <?php if (empty($accepted_queries)): ?>
+                        <div class="alert alert-info">No accepted queries at the moment.</div>
+                    <?php else: ?>
+                        <div class="table-responsive">
+                            <table class="table">
+                                <thead>
+                                    <tr>
+                                        <th>Client</th>
+                                        <th>Category</th>
+                                        <th>Title</th>
+                                        <th>Urgency</th>
+                                        <th>Status</th>
+                                        <th>Created</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php foreach ($accepted_queries as $query): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars($query['client_name']) ?></td>
+                                        <td><?= htmlspecialchars($query['category']) ?></td>
+                                        <td><?= htmlspecialchars($query['title']) ?></td>
+                                        <td>
+                                            <span class="badge bg-<?php 
+                                                echo match($query['urgency_level']) {
+                                                    'high' => 'danger',
+                                                    'medium' => 'warning',
+                                                    'low' => 'success',
+                                                    default => 'secondary'
+                                                };
+                                            ?>">
+                                                <?= ucfirst($query['urgency_level']) ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <span class="badge bg-<?php 
+                                                echo match($query['status']) {
+                                                    'assigned' => 'info',
+                                                    'in_progress' => 'primary',
+                                                    default => 'secondary'
+                                                };
+                                            ?>">
+                                                <?= ucfirst(str_replace('_', ' ', $query['status'])) ?>
+                                            </span>
+                                        </td>
+                                        <td><?= date('Y-m-d', strtotime($query['created_at'])) ?></td>
+                                        <td>
+                                            <button class="btn btn-sm btn-primary view-query" data-id="<?= $query['id'] ?>">
+                                                <i class="fas fa-eye"></i> View
+                                            </button>
+                                            <button class="btn btn-sm btn-success start-chat" data-id="<?= $query['id'] ?>">
+                                                <i class="fas fa-comments"></i> Chat
+                                            </button>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </tbody>
+                            </table>
+                        </div>
+                    <?php endif; ?>
+                </section>
+
+                <!-- Real-Time Chat Interface -->
+                <section id="chat" class="section-card">
+                    <h3><i class="fas fa-comments"></i>Real-Time Chat</h3>
+                    <div class="chat-container">
+                        <!-- Chat interface will be loaded here -->
+                    </div>
+                </section>
+            </div>
+
+            <div class="col-md-4">
+                <!-- Profile & Verification Status -->
+                <section id="profile" class="section-card">
+                    <h3><i class="fas fa-user-cog"></i>Profile Status</h3>
+                    <div class="verification-status mb-3">
+                        <span class="status-badge status-<?= $lawyer['verification_status'] ?>">
+                            <?= ucfirst($lawyer['verification_status']) ?> Verification
+                        </span>
+                    </div>
+                    <div class="profile-info">
+                        <p><strong>Specialization:</strong> <span id="specialization"><?= htmlspecialchars($lawyer['specialization']) ?></span></p>
+                        <p><strong>Experience:</strong> <span id="experience"><?= htmlspecialchars($lawyer['experience_years']) ?></span> years</p>
+                        <p><strong>Rating:</strong> <span id="rating"><?= $avg_rating ?></span></p>
+                    </div>
+                </section>
+
+                <!-- Quick Actions -->
+                <section class="section-card">
+                    <h3><i class="fas fa-bolt"></i>Quick Actions</h3>
+                    <div class="d-grid gap-2">
+                        <button class="action-button action-button-primary">
+                            <i class="fas fa-plus"></i> New Template
+                        </button>
+                        <button class="action-button action-button-secondary">
+                            <i class="fas fa-file-export"></i> Export Reports
+                        </button>
+                    </div>
+                </section>
+            </div>
+        </div>
+    </div>
+
+    <!-- Query Details Modal -->
+    <div class="modal fade" id="queryDetailsModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="queryTitle"></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <h6>Description</h6>
+                        <p id="queryDescription"></p>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-6">
+                            <p><strong>Category:</strong> <span id="queryCategory"></span></p>
+                            <p><strong>Urgency:</strong> <span id="queryUrgency"></span></p>
+                        </div>
+                        <div class="col-md-6">
+                            <p><strong>Client:</strong> <span id="queryClient"></span></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chat Modal -->
+    <div class="modal fade" id="chatModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Chat</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="chat-messages" style="height: 400px; overflow-y: auto; margin-bottom: 1rem;">
+                        <!-- Messages will be loaded here -->
+                    </div>
+                    <form id="chatForm" class="d-flex">
+                        <input type="text" class="form-control me-2" placeholder="Type your message...">
+                        <button type="submit" class="btn btn-primary">Send</button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer -->
+    <footer class="footer bg-dark text-white py-4 mt-5">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>About Cyblex</h5>
+                    <p>Real-time digital legal advisory platform providing instant legal consultations via secure online communications.</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <h5>Contact Us</h5>
+                    <p>
+                        <i class="fas fa-envelope me-2"></i> support@cyblex.com<br>
+                        <i class="fas fa-phone me-2"></i> +94 11 234 5678
+                    </p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- jQuery -->
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <!-- Custom JS (to be created: js/lawyer-dashboard.js) -->
+    <script src="js/lawyer-dashboard.js"></script>
+</body>
+</html> 
