@@ -78,8 +78,8 @@ function handleLogin($data) {
     }
 
     // Validate required fields
-    if (!isset($data['username']) || !isset($data['password'])) {
-        sendJsonResponse(false, 'Username and password are required');
+    if (!isset($data['email']) || !isset($data['password'])) {
+        sendJsonResponse(false, 'Email and password are required');
     }
 
     try {
@@ -87,21 +87,20 @@ function handleLogin($data) {
         
         // Get user from database
         $stmt = $db->query(
-            "SELECT id, username, password, user_type, full_name, language_preference 
+            "SELECT id, email, password, user_type, full_name, language_preference 
              FROM users 
-             WHERE username = ?", 
-            [$data['username']]
+             WHERE email = ?", 
+            [$data['email']]
         );
         
         $user = $stmt->fetch();
 
         if (!$user || !password_verify($data['password'], $user['password'])) {
-            sendJsonResponse(false, 'Invalid username or password');
+            sendJsonResponse(false, 'Invalid email or password');
         }
 
         // Set session variables
         $_SESSION['user_id'] = $user['id'];
-        $_SESSION['username'] = $user['username'];
         $_SESSION['user_type'] = $user['user_type'];
         $_SESSION['full_name'] = $user['full_name'];
         $_SESSION['language_preference'] = $user['language_preference'];
@@ -126,14 +125,13 @@ function handleLogin($data) {
 function handleRegistration($data) {
     try {
         // Sanitize inputs
-        $username = sanitize_input($data['username']);
         $email = sanitize_input($data['email']);
         $password = $data['password']; // Don't sanitize password before hashing
         $full_name = sanitize_input($data['fullName']);
         $user_type = sanitize_input($data['userType']);
 
         // Validate inputs
-        if (empty($username) || empty($email) || empty($password) || empty($full_name) || empty($user_type)) {
+        if (empty($email) || empty($password) || empty($full_name) || empty($user_type)) {
             sendJsonResponse(false, 'All fields are required');
         }
 
@@ -144,12 +142,12 @@ function handleRegistration($data) {
         $db = Database::getInstance();
         $conn = $db->getConnection();
 
-        // Check if username or email already exists
-        $stmt = $conn->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
-        $stmt->execute([$username, $email]);
+        // Check if email already exists
+        $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
+        $stmt->execute([$email]);
         
         if ($stmt->rowCount() > 0) {
-            sendJsonResponse(false, 'Username or email already exists');
+            sendJsonResponse(false, 'Email already exists');
         }
 
         // Hash password
@@ -157,11 +155,11 @@ function handleRegistration($data) {
 
         // Insert new user
         $stmt = $conn->prepare("
-            INSERT INTO users (username, email, password, full_name, user_type)
-            VALUES (?, ?, ?, ?, ?)
+            INSERT INTO users (email, password, full_name, user_type)
+            VALUES (?, ?, ?, ?)
         ");
         
-        $stmt->execute([$username, $email, $hashed_password, $full_name, $user_type]);
+        $stmt->execute([$email, $hashed_password, $full_name, $user_type]);
         
         sendJsonResponse(true, 'Registration successful', [
             'user_id' => $conn->lastInsertId()

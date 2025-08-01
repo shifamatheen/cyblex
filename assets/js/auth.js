@@ -6,7 +6,7 @@ class Auth {
         this.wsConnected = false;
     }
 
-    async register(username, email, password, fullName, userType) {
+    async register(email, password, fullName, userType) {
         try {
             const response = await fetch('/api/auth.php', {
                 method: 'POST',
@@ -15,7 +15,6 @@ class Auth {
                 },
                 body: JSON.stringify({
                     action: 'register',
-                    username,
                     email,
                     password,
                     full_name: fullName,
@@ -35,7 +34,7 @@ class Auth {
         }
     }
 
-    async login(username, password) {
+    async login(email, password) {
         try {
             const response = await fetch('/api/auth.php', {
                 method: 'POST',
@@ -44,7 +43,7 @@ class Auth {
                 },
                 body: JSON.stringify({
                     action: 'login',
-                    username,
+                    email,
                     password
                 })
             });

@@ -28,7 +28,7 @@ class Auth {
         }
     }
 
-    async login(username, password) {
+    async login(email, password) {
         try {
             const response = await fetch('api/process_form.php', {
                 method: 'POST',
@@ -37,7 +37,7 @@ class Auth {
                 },
                 body: JSON.stringify({
                     action: 'login',
-                    username,
+                    email,
                     password
                 })
             });

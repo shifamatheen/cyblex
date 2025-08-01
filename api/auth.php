@@ -37,7 +37,7 @@ $action = $data['action'] ?? '';
 switch ($action) {
     case 'register':
         // Validate required fields
-        $required_fields = ['username', 'email', 'password', 'full_name', 'user_type'];
+        $required_fields = ['email', 'password', 'full_name', 'user_type'];
         foreach ($required_fields as $field) {
             if (empty($data[$field])) {
                 http_response_code(400);
@@ -48,7 +48,6 @@ switch ($action) {
 
         // Register user
         $result = $auth->register(
-            $data['username'],
             $data['email'],
             $data['password'],
             $data['full_name'],
@@ -58,14 +57,14 @@ switch ($action) {
 
     case 'login':
         // Validate required fields
-        if (empty($data['username']) || empty($data['password'])) {
+        if (empty($data['email']) || empty($data['password'])) {
             http_response_code(400);
-            echo json_encode(['error' => 'Username and password are required']);
+            echo json_encode(['error' => 'Email and password are required']);
             exit();
         }
 
         // Login user
-        $result = $auth->login($data['username'], $data['password']);
+        $result = $auth->login($data['email'], $data['password']);
         break;
 
     case 'update_language':

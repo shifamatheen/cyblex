@@ -14,14 +14,14 @@ class Auth {
         $this->jwt_secret = JWT_SECRET;
     }
 
-    public function register($username, $email, $password, $full_name, $user_type) {
+    public function register($email, $password, $full_name, $user_type) {
         try {
-            // Check if username or email already exists
-            $stmt = $this->conn->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
-            $stmt->execute([$username, $email]);
+            // Check if email already exists
+            $stmt = $this->conn->prepare("SELECT id FROM users WHERE email = ?");
+            $stmt->execute([$email]);
             
             if ($stmt->rowCount() > 0) {
-                return ['success' => false, 'message' => 'Username or email already exists'];
+                return ['success' => false, 'message' => 'Email already exists'];
             }
 
             // Hash password
@@ -29,11 +29,11 @@ class Auth {
 
             // Insert new user
             $stmt = $this->conn->prepare("
-                INSERT INTO users (username, email, password, full_name, user_type)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO users (email, password, full_name, user_type)
+                VALUES (?, ?, ?, ?)
             ");
             
-            $stmt->execute([$username, $email, $hashed_password, $full_name, $user_type]);
+            $stmt->execute([$email, $hashed_password, $full_name, $user_type]);
             
             return [
                 'success' => true,
@@ -45,20 +45,20 @@ class Auth {
         }
     }
 
-    public function login($username, $password) {
+    public function login($email, $password) {
         try {
-            // Get user by username
+            // Get user by email
             $stmt = $this->conn->prepare("
-                SELECT id, username, email, password, full_name, user_type
+                SELECT id, email, password, full_name, user_type
                 FROM users
-                WHERE username = ?
+                WHERE email = ?
             ");
             
-            $stmt->execute([$username]);
+            $stmt->execute([$email]);
             $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if (!$user || !password_verify($password, $user['password'])) {
-                return ['success' => false, 'message' => 'Invalid username or password'];
+                return ['success' => false, 'message' => 'Invalid email or password'];
             }
 
             // Generate JWT token
@@ -70,7 +70,6 @@ class Auth {
                 'token' => $token,
                 'user' => [
                     'id' => $user['id'],
-                    'username' => $user['username'],
                     'email' => $user['email'],
                     'full_name' => $user['full_name'],
                     'user_type' => $user['user_type']
@@ -93,8 +92,8 @@ class Auth {
     private function generateToken($user) {
         $payload = [
             'user_id' => $user['id'],
-            'username' => $user['username'],
             'email' => $user['email'],
+            'full_name' => $user['full_name'],
             'user_type' => $user['user_type'],
             'iat' => time(),
             'exp' => time() + (24 * 60 * 60) // 24 hours expiration

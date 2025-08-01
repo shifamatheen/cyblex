@@ -19,7 +19,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Set user name in navbar
     const userNameElement = document.getElementById('userName');
     if (userNameElement) {
-        userNameElement.textContent = user.full_name || user.username;
+                    userNameElement.textContent = user.full_name || user.email;
     }
 
     // Chat functionality
@@ -89,7 +89,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            fetch(`api/get_messages.php?queryId=${queryId}&lastId=${lastMessageId}`, {
+            fetch(`api/get_messages.php?id=${queryId}&type=query&lastId=${lastMessageId}`, {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -223,7 +223,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Load initial messages
         console.log('Fetching initial messages for query:', queryId);
-        fetch(`api/get_messages.php?queryId=${queryId}`, {
+        fetch(`api/get_messages.php?id=${queryId}&type=query`, {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'

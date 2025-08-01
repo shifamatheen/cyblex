@@ -1,76 +1,108 @@
 <?php
-session_start();
+header('Content-Type: application/json');
 require_once '../config/database.php';
 
-// Check if user is logged in
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_type'])) {
-    echo json_encode(['success' => false, 'message' => 'Unauthorized access']);
+// Get the JWT secret from config
+$jwt_secret = JWT_SECRET;
+
+// Check if it's a GET request
+if ($_SERVER['REQUEST_METHOD'] !== 'GET') {
+    http_response_code(405);
+    echo json_encode(['success' => false, 'error' => 'Method not allowed']);
     exit();
 }
 
-if (!isset($_GET['id']) || !isset($_GET['type'])) {
-    echo json_encode(['success' => false, 'message' => 'Query ID and type are required']);
+// Get Authorization header
+$headers = getallheaders();
+$authHeader = isset($headers['Authorization']) ? $headers['Authorization'] : '';
+
+if (!preg_match('/Bearer\s+(.*)$/i', $authHeader, $matches)) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'error' => 'No token provided']);
     exit();
 }
 
-$db = Database::getInstance();
-$conn = $db->getConnection();
+$token = $matches[1];
 
 try {
-    $id = $_GET['id'];
-    $type = $_GET['type'];
-    $user_id = $_SESSION['user_id'];
-    $user_type = $_SESSION['user_type'];
+    // Decode JWT token
+    $parts = explode('.', $token);
+    if (count($parts) !== 3) {
+        throw new Exception('Invalid token format');
+    }
 
-    if ($type === 'query') {
-    $stmt = $conn->prepare("
-            SELECT lq.*, 
-                   u.full_name as client_name, 
-                   u.email as client_email,
-                   l.full_name as lawyer_name,
-                   lc.name as category_name
-        FROM legal_queries lq
-        JOIN users u ON lq.client_id = u.id
-            LEFT JOIN users l ON lq.lawyer_id = l.id
-            LEFT JOIN legal_query_categories lc ON lq.category = lc.name
-            WHERE lq.id = ? AND (lq.client_id = ? OR lq.lawyer_id = ? OR ? = 'admin')
-    ");
-        $stmt->execute([$id, $user_id, $user_id, $user_type]);
-    } else if ($type === 'consultation') {
-        $stmt = $conn->prepare("
-            SELECT c.*, 
-                   u1.full_name as client_name, 
-                   u2.full_name as lawyer_name,
-                   lc.name as category_name
-            FROM consultations c
-            JOIN users u1 ON c.client_id = u1.id
-            JOIN users u2 ON c.lawyer_id = u2.id
-            LEFT JOIN legal_query_categories lc ON c.category = lc.name
-            WHERE c.id = ? AND (c.client_id = ? OR c.lawyer_id = ? OR ? = 'admin')
-        ");
-        $stmt->execute([$id, $user_id, $user_id, $user_type]);
-    } else {
-        echo json_encode(['success' => false, 'message' => 'Invalid type specified']);
+    $header = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $parts[0])), true);
+    $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $parts[1])), true);
+    $signature = $parts[2];
+
+    if (!$header || !$payload) {
+        throw new Exception('Invalid token payload');
+    }
+
+    // Check if token is expired
+    if (isset($payload['exp']) && $payload['exp'] < time()) {
+        throw new Exception('Token expired');
+    }
+
+    // Verify signature
+    $expectedSignature = hash_hmac('sha256', 
+        $parts[0] . "." . $parts[1], 
+        $jwt_secret,
+        true
+    );
+    $expectedSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
+    
+    if (!hash_equals($expectedSignature, $signature)) {
+        throw new Exception('Invalid token signature');
+    }
+
+    $userId = $payload['user_id'];
+    $userType = $payload['user_type'];
+
+    // Get query ID from request
+    if (!isset($_GET['id'])) {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Query ID is required']);
         exit();
     }
 
-    $result = $stmt->fetch(PDO::FETCH_ASSOC);
+    $queryId = intval($_GET['id']);
 
-    if ($result) {
-        echo json_encode([
-            'success' => true,
-            'data' => $result
-        ]);
-    } else {
-        echo json_encode([
-            'success' => false,
-            'message' => 'Record not found or unauthorized access'
-        ]);
+    // Get database connection
+    $db = Database::getInstance();
+    $conn = $db->getConnection();
+
+    // Get query details
+    $stmt = $conn->prepare("
+        SELECT lq.*, l.user_id as lawyer_user_id
+        FROM legal_queries lq
+        LEFT JOIN lawyers l ON lq.lawyer_id = l.id
+        WHERE lq.id = ? AND lq.client_id = ?
+    ");
+    $stmt->execute([$queryId, $userId]);
+    $query = $stmt->fetch();
+
+    if (!$query) {
+        http_response_code(404);
+        echo json_encode(['success' => false, 'error' => 'Query not found']);
+        exit();
     }
-} catch (PDOException $e) {
-    error_log("Error in get_query_details.php: " . $e->getMessage());
+
+    // Return query details
     echo json_encode([
-        'success' => false,
-        'message' => 'Database error occurred'
+        'success' => true,
+        'query' => [
+            'id' => $query['id'],
+            'title' => $query['title'],
+            'category' => $query['category'],
+            'description' => $query['description'],
+            'status' => $query['status'],
+            'lawyer_id' => $query['lawyer_user_id'], // This is the user_id of the lawyer
+            'created_at' => $query['created_at']
+        ]
     ]);
+
+} catch (Exception $e) {
+    http_response_code(401);
+    echo json_encode(['success' => false, 'error' => $e->getMessage()]);
 } 

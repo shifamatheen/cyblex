@@ -44,7 +44,7 @@ try {
     $stmt = $conn->query("SELECT COUNT(*) as pending FROM users WHERE user_type = 'lawyer' AND status = 'pending'");
     $pendingLawyers = $stmt->fetch(PDO::FETCH_ASSOC)['pending'];
 
-    // Get pending verifications with more detailed information
+    // Get pending verifications - simplified query to match the actual data structure
     $stmt = $conn->prepare("
         SELECT 
             u.id as lawyer_id,
@@ -55,28 +55,13 @@ try {
             l.specialization,
             l.experience_years,
             l.bar_council_number,
-            lv.id as verification_id,
-            lv.status as verification_status,
-            lv.document_path,
-            lv.admin_notes,
-            lv.submitted_at,
-            lv.verified_at,
-            lv.verified_by
+            l.verification_status,
+            l.created_at as submitted_at
         FROM users u
-        LEFT JOIN lawyers l ON u.id = l.user_id
-        LEFT JOIN lawyer_verifications lv ON u.id = lv.lawyer_id
+        JOIN lawyers l ON u.id = l.user_id
         WHERE u.user_type = 'lawyer' 
-        AND (
-            (u.status = 'pending' AND lv.id IS NULL)
-            OR 
-            (lv.status = 'pending')
-        )
-        ORDER BY 
-            CASE 
-                WHEN lv.id IS NULL THEN 1 
-                ELSE 0 
-            END,
-            lv.submitted_at DESC
+        AND l.verification_status = 'pending'
+        ORDER BY l.created_at DESC
     ");
     $stmt->execute();
     $verifications = $stmt->fetchAll(PDO::FETCH_ASSOC);

@@ -2,6 +2,9 @@
 header('Content-Type: application/json');
 require_once '../config/database.php';
 
+// Get the JWT secret from config
+$jwt_secret = JWT_SECRET;
+
 function verifyToken($token) {
     $parts = explode('.', $token);
     if (count($parts) !== 3) {
@@ -24,7 +27,7 @@ function verifyToken($token) {
     // Verify signature
     $expectedSignature = hash_hmac('sha256', 
         $parts[0] . "." . $parts[1], 
-        'your-secret-key', // Replace with the same secret key used in process_form.php
+        $jwt_secret,
         true
     );
     $expectedSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
@@ -54,7 +57,7 @@ try {
     
     // Get user data
     $stmt = $db->query(
-        "SELECT id, username, user_type, full_name, language_preference 
+        "SELECT id, email, user_type, full_name, language_preference 
          FROM users 
          WHERE id = ?", 
         [$payload['user_id']]

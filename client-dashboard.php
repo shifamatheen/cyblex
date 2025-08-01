@@ -10,17 +10,46 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_type']) || $_SESSION[
         try {
             $token = $_GET['token'];
             $tokenParts = explode('.', $token);
+            
+            if (count($tokenParts) !== 3) {
+                throw new Exception('Invalid token format');
+            }
+
+            $header = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $tokenParts[0])), true);
             $payload = json_decode(base64_decode(str_replace(['-', '_'], ['+', '/'], $tokenParts[1])), true);
+            $signature = $tokenParts[2];
+
+            if (!$header || !$payload) {
+                throw new Exception('Invalid token payload');
+            }
+
+            // Check if token is expired
+            if (isset($payload['exp']) && $payload['exp'] < time()) {
+                throw new Exception('Token expired');
+            }
+
+            // Verify signature
+            $jwt_secret = JWT_SECRET;
+            $expectedSignature = hash_hmac('sha256', 
+                $tokenParts[0] . "." . $tokenParts[1], 
+                $jwt_secret,
+                true
+            );
+            $expectedSignature = str_replace(['+', '/', '='], ['-', '_', ''], base64_encode($expectedSignature));
+            
+            if (!hash_equals($expectedSignature, $signature)) {
+                throw new Exception('Invalid token signature');
+            }
             
             if ($payload && isset($payload['user_id']) && isset($payload['user_type']) && $payload['user_type'] === 'client') {
                 $_SESSION['user_id'] = $payload['user_id'];
                 $_SESSION['user_type'] = $payload['user_type'];
-                $_SESSION['username'] = $payload['username'];
+                $_SESSION['full_name'] = $payload['full_name'] ?? 'User';
             } else {
-                header('Location: login.html');
-                exit();
+                throw new Exception('Invalid user type or missing user data');
             }
         } catch (Exception $e) {
+            error_log('JWT verification failed: ' . $e->getMessage());
             header('Location: login.html');
             exit();
         }
@@ -36,6 +65,11 @@ $conn = $db->getConnection();
 // --- Handle Legal Query Form Submission ---
 $submitSuccess = null;
 $submitError = null;
+
+// Debug: Log session information
+error_log('Session user_id: ' . ($_SESSION['user_id'] ?? 'not set'));
+error_log('Session user_type: ' . ($_SESSION['user_type'] ?? 'not set'));
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_legal_query'])) {
     $category = trim($_POST['category'] ?? '');
     $urgency = trim($_POST['urgency_level'] ?? '');
@@ -56,16 +90,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_legal_query'])
         if (!$stmt->fetch()) {
             $submitError = 'Invalid category.';
         } else {
-            // Insert into legal_queries
-            $stmt = $conn->prepare('INSERT INTO legal_queries (client_id, category, title, description, urgency_level) VALUES (?, ?, ?, ?, ?)');
-            $stmt->execute([
-                $_SESSION['user_id'],
-                $category,
-                htmlspecialchars($title, ENT_QUOTES, 'UTF-8'),
-                htmlspecialchars($description, ENT_QUOTES, 'UTF-8'),
-                $urgency
-            ]);
-            $submitSuccess = 'Your legal query has been submitted successfully!';
+            // Check if user is properly authenticated
+            if (!isset($_SESSION['user_id'])) {
+                $submitError = 'Authentication error. Please log in again.';
+                error_log('Legal query submission failed: No user_id in session');
+            } else {
+                try {
+                    // Insert into legal_queries
+                    $stmt = $conn->prepare('INSERT INTO legal_queries (client_id, category, title, description, urgency_level) VALUES (?, ?, ?, ?, ?)');
+                    $stmt->execute([
+                        $_SESSION['user_id'],
+                        $category,
+                        htmlspecialchars($title, ENT_QUOTES, 'UTF-8'),
+                        htmlspecialchars($description, ENT_QUOTES, 'UTF-8'),
+                        $urgency
+                    ]);
+                    $submitSuccess = 'Your legal query has been submitted successfully!';
+                    error_log('Legal query submitted successfully for user_id: ' . $_SESSION['user_id']);
+                } catch (Exception $e) {
+                    $submitError = 'Database error. Please try again.';
+                    error_log('Legal query submission database error: ' . $e->getMessage());
+                }
+            }
         }
     }
 }
@@ -87,7 +133,15 @@ $stmt = $conn->prepare("
     SELECT lq.* 
     FROM legal_queries lq 
     WHERE lq.client_id = ? 
-    ORDER BY lq.created_at DESC
+    ORDER BY 
+        CASE lq.status 
+            WHEN 'in_progress' THEN 1
+            WHEN 'assigned' THEN 2
+            WHEN 'completed' THEN 3
+            WHEN 'pending' THEN 4
+            ELSE 5
+        END,
+        lq.created_at DESC
 ");
 $stmt->execute([$_SESSION['user_id']]);
 $legal_queries = $stmt->fetchAll();
@@ -201,24 +255,19 @@ $legal_queries = $stmt->fetchAll();
     <!-- Navigation Bar -->
     <nav class="navbar navbar-expand-lg navbar-light bg-white fixed-top shadow-sm">
         <div class="container">
-            <a class="navbar-brand" href="index.html">
+            <a class="navbar-brand" href="index.php">
                 <img src="assets/images/logo.svg" alt="Cyblex Logo" height="40">
+                <span>Cyblex</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link active" href="#dashboard">Dashboard</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#consultations">My Consultations</a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link" href="#profile">Profile</a>
-                    </li>
-                </ul>
+                                 <ul class="navbar-nav me-auto">
+                     <li class="nav-item">
+                         <a class="nav-link active" href="#dashboard">Dashboard</a>
+                     </li>
+                 </ul>
                 <div class="d-flex align-items-center">
                     <!-- Language Selector -->
                     <div class="language-selector me-3">
@@ -228,32 +277,30 @@ $legal_queries = $stmt->fetchAll();
                             <option value="si">සිංහල</option>
                         </select>
                     </div>
-                    <!-- Notifications Dropdown -->
-                    <div class="dropdown me-3">
-                        <button class="btn btn-outline-primary dropdown-toggle" type="button" id="notificationsDropdown" data-bs-toggle="dropdown">
-                            <i class="fas fa-bell"></i>
-                            <span class="badge bg-danger">3</span>
-                        </button>
-                        <div class="dropdown-menu dropdown-menu-end" aria-labelledby="notificationsDropdown">
-                            <h6 class="dropdown-header">Notifications</h6>
-                            <a class="dropdown-item" href="#">New message from Lawyer</a>
-                            <a class="dropdown-item" href="#">Consultation scheduled</a>
-                            <a class="dropdown-item" href="#">Payment received</a>
-                        </div>
-                    </div>
+                                         <!-- Notifications Dropdown -->
+                     <div class="dropdown me-3">
+                         <button class="btn btn-outline-primary dropdown-toggle" type="button" id="notificationsDropdown" data-bs-toggle="dropdown">
+                             <i class="fas fa-bell"></i>
+                             <span class="badge bg-danger" id="notificationCount" style="display: none;">0</span>
+                         </button>
+                         <div class="dropdown-menu dropdown-menu-end" aria-labelledby="notificationsDropdown">
+                             <h6 class="dropdown-header">Notifications</h6>
+                             <div id="notificationsList">
+                                 <div class="dropdown-item text-muted">No new notifications</div>
+                             </div>
+                         </div>
+                     </div>
                     <!-- User Profile Dropdown -->
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
                             <i class="fas fa-user-circle"></i>
                             <span id="userName">Loading...</span>
                         </a>
-                        <div class="dropdown-menu dropdown-menu-end">
-                            <a class="dropdown-item" href="#"><i class="fas fa-cog"></i> Settings</a>
-                            <div class="dropdown-divider"></div>
-                            <a class="dropdown-item text-danger" href="logout.php">
-                                <i class="fas fa-sign-out-alt"></i> Logout
-                            </a>
-                        </div>
+                                                 <div class="dropdown-menu dropdown-menu-end">
+                             <a class="dropdown-item text-danger" href="logout.php">
+                                 <i class="fas fa-sign-out-alt"></i> Logout
+                             </a>
+                         </div>
                     </li>
                 </div>
             </div>
@@ -325,51 +372,68 @@ $legal_queries = $stmt->fetchAll();
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($legal_queries as $query): ?>
-                        <tr>
-                            <td><?= htmlspecialchars($query['title']) ?></td>
-                            <td><?= htmlspecialchars($query['category']) ?></td>
-                            <td>
-                                <span class="badge bg-<?php 
-                                    echo match($query['urgency_level']) {
-                                        'low' => 'success',
-                                        'medium' => 'warning',
-                                        'high' => 'danger',
-                                        default => 'secondary'
-                                    };
-                                ?>">
-                                    <?= ucfirst($query['urgency_level']) ?>
-                                </span>
-                            </td>
-                            <td>
-                                <span class="badge bg-<?php 
-                                    echo match($query['status']) {
-                                        'pending' => 'warning',
-                                        'assigned' => 'info',
-                                        'in_progress' => 'primary',
-                                        'completed' => 'success',
-                                        'cancelled' => 'danger',
-                                        default => 'secondary'
-                                    };
-                                ?>">
-                                    <?= ucfirst(str_replace('_', ' ', $query['status'])) ?>
-                                </span>
-                            </td>
-                            <td><?= date('Y-m-d', strtotime($query['created_at'])) ?></td>
-                            <td>
-                                <?php if (in_array($query['status'], ['assigned', 'in_progress'])): ?>
-                                <button class="btn btn-sm btn-outline-primary start-chat" data-id="<?= $query['id'] ?>">
-                                    <i class="fas fa-comments"></i> Chat
-                                </button>
-                                <?php endif; ?>
-                                <?php if ($query['status'] === 'completed'): ?>
-                                <button class="btn btn-sm btn-outline-success rate-lawyer" data-id="<?= $query['id'] ?>">
-                                    <i class="fas fa-star"></i> Rate
-                                </button>
-                                <?php endif; ?>
-                            </td>
-                        </tr>
-                        <?php endforeach; ?>
+                                                 <?php foreach ($legal_queries as $query): ?>
+                         <?php
+                         // Check if rating already exists for this query
+                         $ratingExists = false;
+                         if ($query['status'] === 'completed') {
+                             $ratingStmt = $conn->prepare("SELECT 1 FROM ratings WHERE query_id = ?");
+                             $ratingStmt->execute([$query['id']]);
+                             $ratingExists = $ratingStmt->rowCount() > 0;
+                         }
+                         ?>
+                         <tr>
+                             <td><?= htmlspecialchars($query['title']) ?></td>
+                             <td><?= htmlspecialchars($query['category']) ?></td>
+                             <td>
+                                 <span class="badge bg-<?php 
+                                     echo match($query['urgency_level']) {
+                                         'low' => 'success',
+                                         'medium' => 'warning',
+                                         'high' => 'danger',
+                                         default => 'secondary'
+                                     };
+                                 ?>">
+                                     <?= ucfirst($query['urgency_level']) ?>
+                                 </span>
+                             </td>
+                             <td>
+                                 <span class="badge bg-<?php 
+                                     echo match($query['status']) {
+                                         'pending' => 'warning',
+                                         'assigned' => 'info',
+                                         'in_progress' => 'primary',
+                                         'completed' => 'success',
+                                         'cancelled' => 'danger',
+                                         default => 'secondary'
+                                     };
+                                 ?>">
+                                     <?= ucfirst(str_replace('_', ' ', $query['status'])) ?>
+                                 </span>
+                             </td>
+                             <td><?= date('Y-m-d', strtotime($query['created_at'])) ?></td>
+                             <td>
+                                 <?php if (in_array($query['status'], ['assigned', 'in_progress'])): ?>
+                                 <button class="btn btn-sm btn-outline-primary start-chat" data-id="<?= $query['id'] ?>">
+                                     <i class="fas fa-comments"></i> Chat
+                                 </button>
+                                 <button class="btn btn-sm btn-outline-success complete-query" data-id="<?= $query['id'] ?>">
+                                     <i class="fas fa-check"></i> Complete
+                                 </button>
+                                 <?php endif; ?>
+                                 <?php if ($query['status'] === 'completed' && !$ratingExists): ?>
+                                 <button class="btn btn-sm btn-outline-success rate-lawyer" data-id="<?= $query['id'] ?>">
+                                     <i class="fas fa-star"></i> Rate
+                                 </button>
+                                 <?php endif; ?>
+                                 <?php if ($query['status'] === 'completed' && $ratingExists): ?>
+                                 <span class="badge bg-success">
+                                     <i class="fas fa-star"></i> Rated
+                                 </span>
+                                 <?php endif; ?>
+                             </td>
+                         </tr>
+                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
@@ -388,12 +452,12 @@ $legal_queries = $stmt->fetchAll();
                         <div class="chat-messages" style="height: 300px; overflow-y: auto;">
                             <!-- Chat messages will be loaded here -->
                         </div>
-                        <div class="chat-input mt-3">
-                            <form id="chatForm" class="d-flex">
-                                <input type="text" class="form-control me-2" placeholder="Type your message...">
-                                <button type="submit" class="btn btn-primary">Send</button>
-                            </form>
-                        </div>
+                                                 <div class="chat-input mt-3">
+                             <form id="inlineChatForm" class="d-flex">
+                                 <input type="text" class="form-control me-2" placeholder="Type your message...">
+                                 <button type="submit" class="btn btn-primary">Send</button>
+                             </form>
+                         </div>
                     </div>
                 </div>
             </div>
@@ -474,15 +538,14 @@ $legal_queries = $stmt->fetchAll();
                     </thead>
                     <tbody>
                         <?php
-                        $stmt = $conn->prepare("
-                            SELECT r.*, lq.title as query_title, u.full_name as lawyer_name
-                            FROM ratings r
-                            JOIN legal_queries lq ON r.query_id = lq.id
-                            JOIN lawyers l ON r.lawyer_id = l.id
-                            JOIN users u ON l.user_id = u.id
-                            WHERE lq.client_id = ?
-                            ORDER BY r.created_at DESC
-                        ");
+                                                 $stmt = $conn->prepare("
+                             SELECT r.*, lq.title as query_title, u.full_name as lawyer_name
+                             FROM ratings r
+                             JOIN legal_queries lq ON r.query_id = lq.id
+                             JOIN users u ON r.lawyer_id = u.id
+                             WHERE lq.client_id = ?
+                             ORDER BY r.created_at DESC
+                         ");
                         $stmt->execute([$_SESSION['user_id']]);
                         $ratings = $stmt->fetchAll();
                         
@@ -557,10 +620,22 @@ $legal_queries = $stmt->fetchAll();
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <!-- Custom JS -->
-    <script src="js/client-dashboard.js"></script>
-    <script>
-    // Rating form functionality
-    document.addEventListener('DOMContentLoaded', function() {
+    <script src="js/client-dashboard.js?v=<?php echo time(); ?>"></script>
+         <script>
+     // Load notifications
+     function loadNotifications() {
+         const token = localStorage.getItem('token');
+         if (!token) return;
+         
+         // For now, we'll just hide the notification count
+         // In a real implementation, you would fetch notifications from an API
+         document.getElementById('notificationCount').style.display = 'none';
+     }
+     
+     // Rating form functionality
+     document.addEventListener('DOMContentLoaded', function() {
+         // Load notifications on page load
+         loadNotifications();
         const ratingStars = document.querySelectorAll('.rating-stars .fa-star');
         const ratingValue = document.getElementById('ratingValue');
         const ratingText = document.getElementById('ratingText');
@@ -609,21 +684,33 @@ $legal_queries = $stmt->fetchAll();
             const formData = new FormData(ratingForm);
             const data = Object.fromEntries(formData.entries());
             
+            console.log('Rating data being sent:', data);
+            
+            const token = localStorage.getItem('token');
+            if (!token) {
+                window.location.href = 'login.html';
+                return;
+            }
+            
             fetch('api/submit-rating.php', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                    'X-Requested-With': 'XMLHttpRequest'
                 },
                 body: JSON.stringify(data)
             })
             .then(response => response.json())
             .then(result => {
+                console.log('Rating submission result:', result);
                 if (result.success) {
                     alert('Thank you for your feedback!');
                     $('#ratingModal').modal('hide');
-                    // Refresh the queries list to show the rating
-                    loadQueries();
+                    // Refresh the page to show updated data
+                    location.reload();
                 } else {
+                    console.error('Rating submission failed:', result);
                     alert(result.error || 'Failed to submit rating');
                 }
             })
@@ -636,8 +723,19 @@ $legal_queries = $stmt->fetchAll();
 
     // Function to show rating modal
     function showRatingModal(queryId, lawyerId) {
+        const token = localStorage.getItem('token');
+        if (!token) {
+            window.location.href = 'login.html';
+            return;
+        }
+        
         // Check if rating already exists
-        fetch(`api/check-rating.php?query_id=${queryId}`)
+        fetch(`api/check-rating.php?query_id=${queryId}`, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
             .then(response => response.json())
             .then(data => {
                 if (data.success) {

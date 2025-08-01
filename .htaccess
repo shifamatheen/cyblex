@@ -15,3 +15,16 @@ php_value session.cookie_secure 1
 php_value session.cookie_samesite "Strict"
 php_value session.gc_maxlifetime 3600
 php_value session.cookie_lifetime 3600 
+
+RewriteEngine On
+
+# Redirect index.html to index.php
+RewriteRule ^index\.html$ index.php [L,R=301]
+
+# Redirect root to index.php
+RewriteRule ^$ index.php [L]
+
+# Handle other redirects if needed
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteCond %{REQUEST_FILENAME} !-d
+RewriteRule ^(.*)$ index.php [L] 

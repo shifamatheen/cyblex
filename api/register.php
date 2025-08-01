@@ -18,7 +18,7 @@ try {
     $data = json_decode(file_get_contents('php://input'), true);
 
     // Validate required fields
-    $required_fields = ['username', 'email', 'password', 'fullName', 'userType'];
+    $required_fields = ['email', 'password', 'fullName', 'userType'];
     foreach ($required_fields as $field) {
         if (!isset($data[$field]) || empty($data[$field])) {
             throw new Exception("Missing required field: $field");
@@ -34,24 +34,23 @@ try {
     $conn->beginTransaction();
 
     try {
-        // Check if username or email already exists
-        $stmt = $conn->prepare("SELECT id FROM users WHERE username = ? OR email = ?");
-        $stmt->execute([$data['username'], $data['email']]);
+        // Check if email already exists
+        $stmt = $conn->prepare("SELECT id FROM users WHERE email = ?");
+        $stmt->execute([$data['email']]);
         if ($stmt->rowCount() > 0) {
-            throw new Exception("Username or email already exists");
+            throw new Exception("Email already exists");
         }
 
         // Insert new user
         $stmt = $conn->prepare("
-            INSERT INTO users (username, email, password, full_name, user_type, created_at)
-            VALUES (?, ?, ?, ?, ?, NOW())
+            INSERT INTO users (email, password, full_name, user_type, created_at)
+            VALUES (?, ?, ?, ?, NOW())
         ");
 
         // Hash password
         $hashed_password = password_hash($data['password'], PASSWORD_DEFAULT);
 
         $stmt->execute([
-            $data['username'],
             $data['email'],
             $hashed_password,
             $data['fullName'],
@@ -78,7 +77,6 @@ try {
             'message' => 'Registration successful',
             'user' => [
                 'id' => $user_id,
-                'username' => $data['username'],
                 'email' => $data['email'],
                 'fullName' => $data['fullName'],
                 'userType' => $data['userType']

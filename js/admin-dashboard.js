@@ -67,11 +67,11 @@ function initializeVerifications() {
 
 async function loadVerifications() {
     try {
-        const response = await fetch('api/admin/get_verifications.php');
+        const response = await fetch('api/get-pending-verifications.php');
         const data = await response.json();
         
         if (data.success) {
-            displayVerifications(data.verifications);
+            displayVerifications(data.data);
         } else {
             showError('Failed to load verifications');
         }
@@ -83,22 +83,50 @@ async function loadVerifications() {
 
 function displayVerifications(verifications) {
     const tbody = document.getElementById('verificationsTableBody');
+    
+    if (!verifications || verifications.length === 0) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5" class="text-center py-4">
+                    <i class="fas fa-info-circle text-info me-2"></i>
+                    No pending verifications found
+                </td>
+            </tr>
+        `;
+        return;
+    }
+    
     tbody.innerHTML = verifications.map(verification => `
         <tr>
-            <td>${escapeHtml(verification.lawyer_name)}</td>
-            <td>${escapeHtml(verification.specialization)}</td>
+            <td>
+                <div class="d-flex align-items-center">
+                    <img src="${verification.profile_image || 'assets/images/default-avatar.png'}" 
+                         class="rounded-circle me-2" 
+                         width="40" 
+                         height="40" 
+                         alt="${verification.full_name}">
+                    <div>
+                        <div class="fw-bold">${escapeHtml(verification.full_name)}</div>
+                        <small class="text-muted">${escapeHtml(verification.email)}</small>
+                    </div>
+                </div>
+            </td>
+            <td>
+                <div>${escapeHtml(verification.specialization || 'Not specified')}</div>
+                <small class="text-muted">${verification.experience_years || 0} years experience</small>
+            </td>
             <td>${formatDate(verification.submitted_at)}</td>
             <td>
-                <button class="btn btn-sm btn-outline-primary" onclick="viewDocuments(${verification.id})">
-                    <i class="fas fa-file-alt"></i> View
+                <button class="btn btn-sm btn-outline-primary" onclick="viewDocuments(${verification.lawyer_id})">
+                    <i class="fas fa-file-alt"></i> View Documents
                 </button>
             </td>
             <td>
                 <div class="btn-group btn-group-sm">
-                    <button class="btn btn-outline-success" onclick="approveVerification(${verification.id})">
+                    <button class="btn btn-outline-success" onclick="handleVerification(${verification.lawyer_id}, 'approve')">
                         <i class="fas fa-check"></i> Approve
                     </button>
-                    <button class="btn btn-outline-danger" onclick="rejectVerification(${verification.id})">
+                    <button class="btn btn-outline-danger" onclick="handleVerification(${verification.lawyer_id}, 'reject')">
                         <i class="fas fa-times"></i> Reject
                     </button>
                 </div>
@@ -155,7 +183,7 @@ function startPolling(queryId) {
 
     // Start polling for new messages
     pollInterval = setInterval(() => {
-        fetch(`../api/get_messages.php?queryId=${queryId}&lastId=${lastMessageId}`)
+        fetch(`../api/get_messages.php?id=${queryId}&type=query&lastId=${lastMessageId}`)
             .then(response => response.json())
             .then(data => {
                 if (data.success && Array.isArray(data.messages) && data.messages.length > 0) {
@@ -180,7 +208,7 @@ function initializeChat(queryId) {
     const messageInput = chatForm.querySelector('input');
 
     // Load initial messages
-    fetch(`../api/get_messages.php?queryId=${queryId}`)
+    fetch(`../api/get_messages.php?id=${queryId}&type=query`)
         .then(response => response.json())
         .then(data => {
             if (data.success && Array.isArray(data.messages)) {
@@ -613,4 +641,47 @@ function updateNotificationBadge() {
     // TODO: Implement real-time notification updates
     // This would typically involve WebSocket connection
     console.log('Notification badge updated');
+}
+
+// Function to handle verification actions
+function handleVerification(lawyerId, action) {
+    if (!confirm(`Are you sure you want to ${action} this verification?`)) {
+        return;
+    }
+
+    fetch('api/verify-advisor.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+            lawyer_id: lawyerId,
+            action: action
+        })
+    })
+    .then(response => {
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        return response.json();
+    })
+    .then(data => {
+        if (data.error) {
+            throw new Error(data.error);
+        }
+        if (data.success) {
+            showSuccess(data.message || 'Verification processed successfully');
+            loadVerifications(); // Reload the table
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        showError('Failed to process verification: ' + error.message);
+    });
+}
+
+// Function to view documents
+function viewDocuments(lawyerId) {
+    // Implement document viewer modal
+    alert('Document viewer functionality to be implemented');
 } 

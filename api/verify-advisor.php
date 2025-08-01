@@ -37,9 +37,9 @@ try {
     $conn->beginTransaction();
 
     if ($action === 'approve') {
-        // Update lawyer verification status
-        $stmt = $conn->prepare("UPDATE lawyer_verifications SET status = 'verified', verified_at = NOW(), verified_by = ? WHERE lawyer_id = ?");
-        $stmt->execute([$_SESSION['user_id'], $lawyer_id]);
+        // Update lawyer verification status in lawyers table
+        $stmt = $conn->prepare("UPDATE lawyers SET verification_status = 'verified', updated_at = NOW() WHERE user_id = ?");
+        $stmt->execute([$lawyer_id]);
 
         // Update user status
         $stmt = $conn->prepare("UPDATE users SET status = 'active' WHERE id = ? AND user_type = 'lawyer'");
@@ -52,9 +52,9 @@ try {
         $conn->commit();
         echo json_encode(['success' => true, 'message' => 'Advisor verification approved successfully']);
     } else if ($action === 'reject') {
-        // Update lawyer verification status
-        $stmt = $conn->prepare("UPDATE lawyer_verifications SET status = 'rejected', verified_at = NOW(), verified_by = ? WHERE lawyer_id = ?");
-        $stmt->execute([$_SESSION['user_id'], $lawyer_id]);
+        // Update lawyer verification status in lawyers table
+        $stmt = $conn->prepare("UPDATE lawyers SET verification_status = 'rejected', updated_at = NOW() WHERE user_id = ?");
+        $stmt->execute([$lawyer_id]);
 
         // Log the rejection
         $stmt = $conn->prepare("INSERT INTO admin_logs (admin_id, action, target_id, details) VALUES (?, 'reject_advisor', ?, 'Advisor verification rejected')");

@@ -13,7 +13,7 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_type']) || $_SESSION[
             if ($payload && isset($payload['user_id']) && isset($payload['user_type']) && $payload['user_type'] === 'lawyer') {
                 $_SESSION['user_id'] = $payload['user_id'];
                 $_SESSION['user_type'] = $payload['user_type'];
-                $_SESSION['username'] = $payload['username'];
+                $_SESSION['full_name'] = $payload['full_name'] ?? 'User';
             } else {
                 header('Location: login.html');
                 exit();
@@ -47,11 +47,10 @@ try {
             l.experience_years,
             l.hourly_rate,
             l.languages,
-            COALESCE(lv.status, 'pending') as verification_status,
-            COALESCE(l.status, 'pending') as status
+            l.verification_status,
+            l.status
         FROM users u 
-        LEFT JOIN lawyers l ON u.id = l.user_id 
-        LEFT JOIN lawyer_verifications lv ON l.id = lv.lawyer_id 
+        JOIN lawyers l ON u.id = l.user_id 
         WHERE u.id = ?
     ");
     $stmt->execute([$_SESSION['user_id']]);
@@ -80,7 +79,7 @@ try {
                 l.experience_years,
                 l.hourly_rate,
                 l.languages,
-                'pending' as verification_status,
+                l.verification_status,
                 l.status
             FROM users u 
             JOIN lawyers l ON u.id = l.user_id 
@@ -130,7 +129,7 @@ try {
                 l.experience_years,
                 l.hourly_rate,
                 l.languages,
-                'pending' as verification_status,
+                l.verification_status,
                 l.status
             FROM users u 
             JOIN lawyers l ON u.id = l.user_id 
@@ -511,23 +510,16 @@ try {
     <!-- Navigation Bar -->
     <nav class="navbar navbar-expand-lg navbar-light fixed-top">
         <div class="container">
-            <a class="navbar-brand" href="index.html">
+            <a class="navbar-brand" href="index.php">
                 <img src="assets/images/logo.svg" alt="Cyblex Logo" height="40">
-                <span>Lawyer Dashboard</span>
+                <span>Cyblex</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
                 <ul class="navbar-nav me-auto">
-                    <li class="nav-item"><a class="nav-link active" href="#pending">Pending Queries</a></li>
-                    <?php if ($lawyer['status'] === 'active'): ?>
-                    <li class="nav-item"><a class="nav-link" href="#chat">Chat</a></li>
-                    <?php endif; ?>
-                    <li class="nav-item"><a class="nav-link" href="#templates">Templates</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#profile">Profile</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#ratings">Ratings</a></li>
-                    <li class="nav-item"><a class="nav-link" href="#history">History & Stats</a></li>
+                    <li class="nav-item"><a class="nav-link active" href="#dashboard">Dashboard</a></li>
                 </ul>
                 <div class="d-flex align-items-center">
                     <li class="nav-item dropdown">
@@ -536,8 +528,6 @@ try {
                             <span id="userName"><?= htmlspecialchars($lawyer['full_name']) ?></span>
                         </a>
                         <div class="dropdown-menu dropdown-menu-end">
-                            <a class="dropdown-item" href="#"><i class="fas fa-cog"></i> Settings</a>
-                            <div class="dropdown-divider"></div>
                             <a class="dropdown-item text-danger" href="logout.php">
                                 <i class="fas fa-sign-out-alt"></i> Logout
                             </a>
@@ -877,6 +867,6 @@ try {
     <!-- jQuery -->
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <!-- Custom JS (to be created: js/lawyer-dashboard.js) -->
-    <script src="js/lawyer-dashboard.js"></script>
+    <script src="js/lawyer-dashboard.js?v=<?php echo time(); ?>"></script>
 </body>
 </html> 

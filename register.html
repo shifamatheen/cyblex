@@ -9,7 +9,39 @@
     <link href="css/style.css" rel="stylesheet">
 </head>
 <body class="bg-light">
-    <div class="container">
+    <!-- Navigation Bar -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white fixed-top shadow-sm">
+        <div class="container">
+            <a class="navbar-brand" href="index.php">
+                <img src="assets/images/logo.svg" alt="Cyblex Logo" height="40">
+                <span>Cyblex</span>
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav me-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="login.html">Find A Lawyer</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="login.html">Legal Advice</a>
+                    </li>
+                </ul>
+                <div class="d-flex align-items-center">
+                    <div class="language-selector me-3">
+                        <select class="form-select form-select-sm">
+                            <option value="en">English</option>
+                            <option value="ta">தமிழ்</option>
+                            <option value="si">සිංහල</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-5 pt-4">
         <div class="row justify-content-center mt-5">
             <div class="col-md-6">
                 <div class="card shadow">
@@ -31,10 +63,7 @@
                                 <input type="text" class="form-control" id="fullName" name="fullName" required>
                             </div>
 
-                            <div class="mb-3">
-                                <label for="username" class="form-label">Username</label>
-                                <input type="text" class="form-control" id="username" name="username" required>
-                            </div>
+
 
                             <div class="mb-3">
                                 <label for="email" class="form-label">Email</label>
@@ -65,6 +94,25 @@
         </div>
     </div>
 
+    <!-- Footer -->
+    <footer class="footer bg-dark text-white py-4 mt-5">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>About Cyblex</h5>
+                    <p>Real-time digital legal advisory platform providing instant legal consultations via secure online communications.</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <h5>Contact Us</h5>
+                    <p>
+                        <i class="fas fa-envelope me-2"></i> support@cyblex.com<br>
+                        <i class="fas fa-phone me-2"></i> +94 11 234 5678
+                    </p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
         document.getElementById('registerForm').addEventListener('submit', function(e) {
@@ -73,7 +121,6 @@
             // Get form data
             const formData = {
                 fullName: document.getElementById('fullName').value,
-                username: document.getElementById('username').value,
                 email: document.getElementById('email').value,
                 password: document.getElementById('password').value,
                 userType: document.getElementById('userType').value

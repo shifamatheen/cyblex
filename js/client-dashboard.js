@@ -11,13 +11,14 @@ $(document).ready(function() {
     // Set user name in navbar
     const userNameElement = document.getElementById('userName');
     if (userNameElement) {
-        userNameElement.textContent = user.full_name || user.username;
+                    userNameElement.textContent = user.full_name || user.email;
     }
 
     // Chat functionality
     let currentQueryId = null;
     let lastMessageId = 0;
     let chatInterval = null;
+    let isChatOpen = false;
 
     function showError(message) {
         console.error('Chat Error:', message);
@@ -77,7 +78,7 @@ $(document).ready(function() {
                 return;
             }
 
-            fetch(`api/get_messages.php?queryId=${queryId}&lastId=${lastMessageId}`, {
+            fetch(`api/get_messages.php?id=${queryId}&type=query&lastId=${lastMessageId}`, {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -139,6 +140,7 @@ $(document).ready(function() {
         }
 
         currentQueryId = queryId;
+        isChatOpen = true;
         const chatMessages = document.querySelector('#chatModal .chat-messages');
         if (!chatMessages) {
             console.error('Chat messages container not found');
@@ -161,7 +163,7 @@ $(document).ready(function() {
 
         // Load initial messages
         console.log('Fetching initial messages for query:', queryId);
-        fetch(`api/get_messages.php?queryId=${queryId}`, {
+        fetch(`api/get_messages.php?id=${queryId}&type=query`, {
             headers: {
                 'Authorization': `Bearer ${token}`
             }
@@ -229,18 +231,15 @@ $(document).ready(function() {
             const chatModal = new bootstrap.Modal(document.getElementById('chatModal'));
             chatModal.show();
             
-            // Start polling for messages
-            if (chatInterval) {
-                clearInterval(chatInterval);
-            }
-            loadMessages();
-            chatInterval = setInterval(loadMessages, 3000);
+            // Initialize chat for this query
+            initializeChat(queryId);
         });
     });
 
     // Function to load messages
     async function loadMessages() {
-        if (!currentQueryId) return;
+        // Only load messages if chat is open and we have a current query
+        if (!currentQueryId || !isChatOpen) return;
 
         const token = localStorage.getItem('token');
         if (!token) {
@@ -250,8 +249,8 @@ $(document).ready(function() {
         }
 
         try {
-            console.log('Loading messages with token:', token.substring(0, 20) + '...');
-            const response = await fetch(`api/get_messages.php?queryId=${currentQueryId}&lastId=${lastMessageId}`, {
+            console.log('Loading messages for query:', currentQueryId, 'lastId:', lastMessageId);
+            const response = await fetch(`api/get_messages.php?id=${currentQueryId}&type=query&lastId=${lastMessageId}`, {
                 method: 'GET',
                 headers: {
                     'Authorization': `Bearer ${token}`,
@@ -334,65 +333,125 @@ $(document).ready(function() {
         return div;
     }
 
-    // Chat form submission
-    const chatForm = document.getElementById('chatForm');
-    if (chatForm) {
-        chatForm.addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const token = localStorage.getItem('token');
-            if (!token) {
-                console.error('No token found');
-                window.location.href = 'login.html';
-                return;
-            }
+         // Chat form submission (Modal)
+     const chatForm = document.getElementById('chatForm');
+     if (chatForm) {
+         chatForm.addEventListener('submit', async function(e) {
+             e.preventDefault();
+             
+             const token = localStorage.getItem('token');
+             if (!token) {
+                 console.error('No token found');
+                 window.location.href = 'login.html';
+                 return;
+             }
 
-            const messageInput = document.getElementById('messageInput');
-            const message = messageInput.value.trim();
-            
-            if (!message || !currentQueryId) return;
+             const messageInput = document.getElementById('messageInput');
+             const message = messageInput.value.trim();
+             
+             if (!message || !currentQueryId) return;
 
-            try {
-                console.log('Sending message with token:', token.substring(0, 20) + '...');
-                const response = await fetch('api/send_message.php', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`,
-                        'X-Requested-With': 'XMLHttpRequest'
-                    },
-                    credentials: 'include',
-                    body: JSON.stringify({
-                        query_id: currentQueryId,
-                        message: message
-                    })
-                });
+             try {
+                 console.log('Sending message with token:', token.substring(0, 20) + '...');
+                 const response = await fetch('api/send_message.php', {
+                     method: 'POST',
+                     headers: {
+                         'Content-Type': 'application/json',
+                         'Authorization': `Bearer ${token}`,
+                         'X-Requested-With': 'XMLHttpRequest'
+                     },
+                     credentials: 'include',
+                     body: JSON.stringify({
+                         query_id: currentQueryId,
+                         message: message
+                     })
+                 });
 
-                if (response.status === 401) {
-                    console.error('Unauthorized access');
-                    localStorage.removeItem('token');
-                    localStorage.removeItem('user');
-                    window.location.href = 'login.html';
-                    return;
-                }
+                 if (response.status === 401) {
+                     console.error('Unauthorized access');
+                     localStorage.removeItem('token');
+                     localStorage.removeItem('user');
+                     window.location.href = 'login.html';
+                     return;
+                 }
 
-                const data = await response.json();
-                console.log('Send message response:', data);
-                
-                if (data.success) {
-                    messageInput.value = '';
-                    // Reload messages immediately
-                    initializeChat(currentQueryId);
-                } else {
-                    console.error('Failed to send message:', data.error);
-                    alert('Failed to send message: ' + (data.error || 'Unknown error'));
-                }
-            } catch (error) {
-                console.error('Error sending message:', error);
-                alert('Error sending message. Please try again.');
-            }
-        });
-    }
+                 const data = await response.json();
+                 console.log('Send message response:', data);
+                 
+                 if (data.success) {
+                     messageInput.value = '';
+                     // Reload messages immediately
+                     initializeChat(currentQueryId);
+                 } else {
+                     console.error('Failed to send message:', data.error);
+                     alert('Failed to send message: ' + (data.error || 'Unknown error'));
+                 }
+             } catch (error) {
+                 console.error('Error sending message:', error);
+                 alert('Error sending message. Please try again.');
+             }
+         });
+     }
+
+     // Inline chat form submission (if needed)
+     const inlineChatForm = document.getElementById('inlineChatForm');
+     if (inlineChatForm) {
+         inlineChatForm.addEventListener('submit', async function(e) {
+             e.preventDefault();
+             
+             const token = localStorage.getItem('token');
+             if (!token) {
+                 console.error('No token found');
+                 window.location.href = 'login.html';
+                 return;
+             }
+
+             const messageInput = inlineChatForm.querySelector('input[type="text"]');
+             const message = messageInput.value.trim();
+             
+             if (!message || !currentQueryId) return;
+
+             try {
+                 console.log('Sending message via inline form with token:', token.substring(0, 20) + '...');
+                 const response = await fetch('api/send_message.php', {
+                     method: 'POST',
+                     headers: {
+                         'Content-Type': 'application/json',
+                         'Authorization': `Bearer ${token}`,
+                         'X-Requested-With': 'XMLHttpRequest'
+                     },
+                     credentials: 'include',
+                     body: JSON.stringify({
+                         query_id: currentQueryId,
+                         message: message
+                     })
+                 });
+
+                 if (response.status === 401) {
+                     console.error('Unauthorized access');
+                     localStorage.removeItem('token');
+                     localStorage.removeItem('user');
+                     window.location.href = 'login.html';
+                     return;
+                 }
+
+                 const data = await response.json();
+                 console.log('Send message response:', data);
+                 
+                 if (data.success) {
+                     messageInput.value = '';
+                     // Reload messages immediately
+                     initializeChat(currentQueryId);
+                 } else {
+                     console.error('Failed to send message:', data.error);
+                     alert('Failed to send message: ' + (data.error || 'Unknown error'));
+                 }
+             } catch (error) {
+                 console.error('Error sending message:', error);
+                 alert('Error sending message. Please try again.');
+             }
+         });
+     }
 
     // Clean up on modal close
     document.getElementById('chatModal').addEventListener('hidden.bs.modal', function() {
@@ -610,9 +669,101 @@ $(document).ready(function() {
         });
     });
 
-    // Rate lawyer button click
-    $('.rate-lawyer').click(function() {
-        const consultationId = $(this).data('id');
-        $('#ratingModal').data('consultation-id', consultationId).modal('show');
-    });
-}); 
+         // Rate lawyer button click
+     $('.rate-lawyer').click(function() {
+         const queryId = $(this).data('id');
+         
+         // Get the lawyer ID for this query
+         fetch(`api/get_query_details.php?id=${queryId}`, {
+             headers: {
+                 'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                 'X-Requested-With': 'XMLHttpRequest'
+             }
+         })
+         .then(response => response.json())
+         .then(data => {
+             if (data.success && data.query.lawyer_id) {
+                 // Set the values in the rating modal
+                 document.getElementById('ratingQueryId').value = queryId;
+                 document.getElementById('ratingLawyerId').value = data.query.lawyer_id;
+                 
+                 // Reset the rating form
+                 document.getElementById('ratingValue').value = '';
+                 document.getElementById('reviewText').value = '';
+                 document.querySelectorAll('.rating-stars .fa-star').forEach(s => s.classList.remove('active'));
+                 document.getElementById('ratingText').textContent = 'Select your rating';
+                 
+                 // Show the modal
+                 $('#ratingModal').modal('show');
+             } else {
+                 alert('Unable to get query details for rating');
+             }
+         })
+         .catch(error => {
+             console.error('Error:', error);
+             alert('Failed to load query details for rating');
+         });
+     });
+
+     // Complete query button click handler
+     $(document).on('click', '.complete-query', function() {
+         const queryId = $(this).data('id');
+         
+         if (!confirm('Are you sure you want to mark this query as completed? This action cannot be undone.')) {
+             return;
+         }
+         
+         const token = localStorage.getItem('token');
+         if (!token) {
+             window.location.href = 'login.html';
+             return;
+         }
+         
+         fetch('api/complete_query.php', {
+             method: 'POST',
+             headers: {
+                 'Content-Type': 'application/json',
+                 'Authorization': `Bearer ${token}`,
+                 'X-Requested-With': 'XMLHttpRequest'
+             },
+             credentials: 'include',
+             body: JSON.stringify({
+                 query_id: queryId
+             })
+         })
+         .then(response => response.json())
+         .then(data => {
+             if (data.success) {
+                 alert('Query completed successfully!');
+                 // Refresh the page to show updated status
+                 location.reload();
+             } else {
+                 alert(data.error || 'Failed to complete query');
+             }
+         })
+         .catch(error => {
+             console.error('Error:', error);
+             alert('Failed to complete query. Please try again.');
+         });
+     });
+
+     // Chat modal event handlers
+     $('#chatModal').on('show.bs.modal', function() {
+         // Chat modal is being opened
+         console.log('Chat modal opened');
+     });
+
+     $('#chatModal').on('hidden.bs.modal', function() {
+         // Chat modal is being closed
+         console.log('Chat modal closed');
+         isChatOpen = false;
+         currentQueryId = null;
+         lastMessageId = 0;
+         
+         // Clear the chat interval
+         if (chatInterval) {
+             clearInterval(chatInterval);
+             chatInterval = null;
+         }
+     });
+ }); 

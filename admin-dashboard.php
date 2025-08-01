@@ -79,13 +79,17 @@ try {
     ");
     $recent_users = $stmt->fetchAll();
 
+    // Get pending verifications count
+    $stmt = $conn->query("SELECT COUNT(*) as count FROM lawyers WHERE verification_status = 'pending'");
+    $pending_verifications = $stmt->fetch()['count'];
+
     $stats = [
         'total_users' => $conn->query("SELECT COUNT(*) FROM users")->fetchColumn(),
         'total_lawyers' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'lawyer'")->fetchColumn(),
         'total_clients' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'client'")->fetchColumn(),
         'total_queries' => $total_queries,
         'active_queries' => $active_users,
-        'pending_verifications' => $pending_queries
+        'pending_verifications' => $pending_verifications
     ];
 } catch (PDOException $e) {
     // If lawyer_verifications table doesn't exist, set pending_verifications to 0
@@ -106,13 +110,14 @@ try {
         $total_revenue = 0;
         $recent_queries = [];
         $recent_users = [];
+        $pending_verifications = 0;
         $stats = [
             'total_users' => $conn->query("SELECT COUNT(*) FROM users")->fetchColumn(),
             'total_lawyers' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'lawyer'")->fetchColumn(),
             'total_clients' => $conn->query("SELECT COUNT(*) FROM users WHERE user_type = 'client'")->fetchColumn(),
             'total_queries' => $total_queries,
             'active_queries' => $active_users,
-            'pending_verifications' => 0
+            'pending_verifications' => $pending_verifications
         ];
     }
 }
@@ -220,9 +225,9 @@ try {
     <!-- Navigation -->
     <nav class="navbar navbar-expand-lg navbar-dark fixed-top">
         <div class="container-fluid">
-            <a class="navbar-brand" href="#">
+            <a class="navbar-brand" href="index.php">
                 <img src="assets/images/logo.svg" alt="Cyblex Logo" height="40">
-                <span>Admin Dashboard</span>
+                <span>Cyblex</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
@@ -253,8 +258,6 @@ try {
                             <?php echo htmlspecialchars($_SESSION['full_name']); ?>
                         </a>
                         <div class="dropdown-menu dropdown-menu-end">
-                            <a class="dropdown-item" href="#"><i class="fas fa-cog"></i> Settings</a>
-                            <div class="dropdown-divider"></div>
                             <a class="dropdown-item text-danger" href="logout.php">
                                 <i class="fas fa-sign-out-alt"></i> Logout
                             </a>
@@ -580,9 +583,11 @@ try {
                     }
                     return response.json();
                 })
-                .then(verifications => {
+                .then(data => {
                     const tbody = document.getElementById('verificationsTableBody');
                     tbody.innerHTML = '';
+                    
+                    const verifications = data.data || [];
                     
                     if (!Array.isArray(verifications) || verifications.length === 0) {
                         tbody.innerHTML = `
