@@ -1,17 +1,18 @@
 <?php
+require_once 'cors_config.php';
 session_start();
 require_once '../config/database.php';
 
-header('Content-Type: application/json');
-
 // Check if user is logged in and is a client
 if (!isset($_SESSION['user_id']) || $_SESSION['user_type'] !== 'client') {
-    echo json_encode(['success' => false, 'message' => 'Unauthorized access']);
+    error_log('Submit query - Session check failed. user_id: ' . ($_SESSION['user_id'] ?? 'not set') . ', user_type: ' . ($_SESSION['user_type'] ?? 'not set'));
+    echo json_encode(['success' => false, 'message' => 'Unauthorized access - please log in again']);
     exit();
 }
 
 // Validate input
 if (!isset($_POST['title']) || !isset($_POST['category']) || !isset($_POST['description']) || !isset($_POST['urgency_level'])) {
+    error_log('Submit query - Missing required fields. POST data: ' . json_encode($_POST));
     echo json_encode(['success' => false, 'message' => 'Missing required fields']);
     exit();
 }
@@ -62,16 +63,20 @@ try {
         // Update legal query with lawyer
         $stmt = $conn->prepare("
             UPDATE legal_queries 
-            SET assigned_lawyer_id = ?,
+            SET lawyer_id = ?,
                 status = 'assigned'
             WHERE id = ?
         ");
         $stmt->execute([$lawyer['id'], $queryId]);
+        error_log('Submit query - Lawyer assigned: ' . $lawyer['id'] . ' to query: ' . $queryId);
+    } else {
+        error_log('Submit query - No lawyer found for category: ' . $_POST['category'] . ' and language: ' . $language);
     }
 
     // Commit transaction
     $conn->commit();
 
+    error_log('Submit query - Success: Query ID ' . $queryId . ' submitted by user ' . $_SESSION['user_id']);
     echo json_encode(['success' => true, 'message' => 'Query submitted successfully']);
 
 } catch (Exception $e) {
@@ -79,6 +84,7 @@ try {
     if ($conn->inTransaction()) {
         $conn->rollBack();
     }
+    error_log('Submit query - Database error: ' . $e->getMessage());
     echo json_encode(['success' => false, 'message' => 'Database error: ' . $e->getMessage()]);
 }
 ?> 

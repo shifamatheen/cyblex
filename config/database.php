@@ -1,26 +1,21 @@
 <?php
 // Database configuration
-define('DB_HOST', 'localhost');
-define('DB_USER', 'root');
-define('DB_PASS', '');
-define('DB_NAME', 'cyblex');
-define('JWT_SECRET', 'cyblex-secure-jwt-secret-key-2024');
+define('DB_HOST', 'fdb1034.awardspace.net');
+define('DB_USER', '4666256_cyblex');
+define('DB_PASS', 'lFcgcc262moS33i%');
+define('DB_NAME', '4666256_cyblex');
+define('JWT_SECRET', 'b2fd856537d804aeabf63931cd1967584c0f2b8079c403ddd75c40b1366e4f84016d7aaf09c8fb3dc3ed136c2e0fdd28b96556d463b53f982d003facc74526c7');
 
 class Database {
     private static $instance = null;
     private $conn;
-    
-    private $host = 'localhost';
-    private $db_name = 'cyblex';
-    private $username = 'root';
-    private $password = '';
 
     private function __construct() {
         try {
             $this->conn = new PDO(
-                "mysql:host=" . $this->host . ";dbname=" . $this->db_name,
-                $this->username,
-                $this->password,
+                "mysql:host=" . DB_HOST . ";dbname=" . DB_NAME,
+                DB_USER,
+                DB_PASS,
                 array(
                     PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
                     PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,

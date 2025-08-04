@@ -83,7 +83,6 @@ if ($isLoggedIn) {
         <div class="container">
             <a class="navbar-brand" href="index.php">
                 <img src="assets/images/logo.svg" alt="Cyblex Logo" height="40">
-                <span>Cyblex</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
@@ -244,7 +243,7 @@ if ($isLoggedIn) {
         <div class="container">
             <h2 class="text-center mb-5">Our Clients Say</h2>
             <div class="row g-4">
-                <div class="col-md-4">
+                <div class="col-md-6">
                     <div class="testimonial-card p-4">
                         <div class="stars mb-3">
                             <i class="fas fa-star text-warning"></i>
@@ -253,14 +252,14 @@ if ($isLoggedIn) {
                             <i class="fas fa-star text-warning"></i>
                             <i class="fas fa-star text-warning"></i>
                         </div>
-                        <p class="mb-3">"Cyblex helped me resolve my property dispute quickly and efficiently. The lawyer was professional and knowledgeable."</p>
+                        <p class="mb-3">"Cyblex is honestly a game-changer for law students like me. I can get quick, reliable clarifications without disturbing my lecturers all the time."</p>
                         <div class="client-info">
-                            <strong>Ravi Kumar</strong>
-                            <small class="text-muted d-block">Property Law</small>
+                            <strong>Iffath Ismath</strong>
+                            <small class="text-muted d-block">Law Student</small>
                         </div>
                     </div>
                 </div>
-                <div class="col-md-4">
+                <div class="col-md-6">
                     <div class="testimonial-card p-4">
                         <div class="stars mb-3">
                             <i class="fas fa-star text-warning"></i>
@@ -269,26 +268,10 @@ if ($isLoggedIn) {
                             <i class="fas fa-star text-warning"></i>
                             <i class="fas fa-star text-warning"></i>
                         </div>
-                        <p class="mb-3">"Excellent service! I got immediate help with my employment contract. The platform is user-friendly and secure."</p>
+                        <p class="mb-3">"What I love most is the quick response. I didn't have to wait weeks for an appointment — I got the help I needed the same day."</p>
                         <div class="client-info">
-                            <strong>Sarah Johnson</strong>
-                            <small class="text-muted d-block">Employment Law</small>
-                        </div>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="testimonial-card p-4">
-                        <div class="stars mb-3">
-                            <i class="fas fa-star text-warning"></i>
-                            <i class="fas fa-star text-warning"></i>
-                            <i class="fas fa-star text-warning"></i>
-                            <i class="fas fa-star text-warning"></i>
-                            <i class="fas fa-star text-warning"></i>
-                        </div>
-                        <p class="mb-3">"The real-time chat feature is amazing. I could get instant answers to my legal questions without leaving my home."</p>
-                        <div class="client-info">
-                            <strong>Mohammed Ali</strong>
-                            <small class="text-muted d-block">Family Law</small>
+                            <strong>Zenadheen</strong>
+                            <small class="text-muted d-block">Client</small>
                         </div>
                     </div>
                 </div>
@@ -316,18 +299,15 @@ if ($isLoggedIn) {
                 <div class="col-md-4">
                     <h5>Contact Us</h5>
                     <p>
-                        <i class="fas fa-envelope me-2"></i> support@cyblex.com<br>
-                        <i class="fas fa-phone me-2"></i> +94 11 234 5678
+                        <i class="fas fa-envelope me-2"></i> shifa@trexsolutions.co<br>
+                        <i class="fas fa-phone me-2"></i> 70 217 0512
                     </p>
                 </div>
             </div>
             <hr class="my-4">
             <div class="row">
-                <div class="col-md-6">
+                <div class="col-md-12 text-center">
                     <p class="mb-0">&copy; 2024 Cyblex. All rights reserved.</p>
-                </div>
-                <div class="col-md-6 text-md-end">
-                    <p class="mb-0">Made with ❤️ for Sri Lanka</p>
                 </div>
             </div>
         </div>

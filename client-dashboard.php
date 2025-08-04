@@ -63,58 +63,8 @@ $db = Database::getInstance();
 $conn = $db->getConnection();
 
 // --- Handle Legal Query Form Submission ---
-$submitSuccess = null;
-$submitError = null;
-
-// Debug: Log session information
-error_log('Session user_id: ' . ($_SESSION['user_id'] ?? 'not set'));
-error_log('Session user_type: ' . ($_SESSION['user_type'] ?? 'not set'));
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['submit_legal_query'])) {
-    $category = trim($_POST['category'] ?? '');
-    $urgency = trim($_POST['urgency_level'] ?? '');
-    $title = trim($_POST['title'] ?? '');
-    $description = trim($_POST['description'] ?? '');
-
-    // Validate
-    if (!$category || !$urgency || !$title || !$description) {
-        $submitError = 'All fields are required.';
-    } elseif (strlen($title) < 5 || strlen($title) > 255) {
-        $submitError = 'Title must be between 5 and 255 characters.';
-    } elseif (strlen($description) < 20) {
-        $submitError = 'Description must be at least 20 characters.';
-    } else {
-        // Check category exists
-        $stmt = $conn->prepare('SELECT id FROM legal_query_categories WHERE name = ?');
-        $stmt->execute([$category]);
-        if (!$stmt->fetch()) {
-            $submitError = 'Invalid category.';
-        } else {
-            // Check if user is properly authenticated
-            if (!isset($_SESSION['user_id'])) {
-                $submitError = 'Authentication error. Please log in again.';
-                error_log('Legal query submission failed: No user_id in session');
-            } else {
-                try {
-                    // Insert into legal_queries
-                    $stmt = $conn->prepare('INSERT INTO legal_queries (client_id, category, title, description, urgency_level) VALUES (?, ?, ?, ?, ?)');
-                    $stmt->execute([
-                        $_SESSION['user_id'],
-                        $category,
-                        htmlspecialchars($title, ENT_QUOTES, 'UTF-8'),
-                        htmlspecialchars($description, ENT_QUOTES, 'UTF-8'),
-                        $urgency
-                    ]);
-                    $submitSuccess = 'Your legal query has been submitted successfully!';
-                    error_log('Legal query submitted successfully for user_id: ' . $_SESSION['user_id']);
-                } catch (Exception $e) {
-                    $submitError = 'Database error. Please try again.';
-                    error_log('Legal query submission database error: ' . $e->getMessage());
-                }
-            }
-        }
-    }
-}
+// Note: Form submission is now handled via AJAX in client-dashboard.js
+// Server-side processing has been removed to prevent conflicts
 
 // --- Fetch categories for the dropdown ---
 $categories = [];
@@ -257,7 +207,6 @@ $legal_queries = $stmt->fetchAll();
         <div class="container">
             <a class="navbar-brand" href="index.php">
                 <img src="assets/images/logo.svg" alt="Cyblex Logo" height="40">
-                <span>Cyblex</span>
             </a>
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
@@ -312,12 +261,7 @@ $legal_queries = $stmt->fetchAll();
         <!-- Legal Query Form -->
         <section class="query-form">
             <h3 class="mb-4"><i class="fas fa-question-circle"></i> Submit Legal Query</h3>
-            <?php if ($submitSuccess): ?>
-                <div class="alert alert-success"> <?= $submitSuccess ?> </div>
-            <?php elseif ($submitError): ?>
-                <div class="alert alert-danger"> <?= $submitError ?> </div>
-            <?php endif; ?>
-            <form id="legalQueryForm" method="POST" action="">
+            <form id="legalQueryForm" method="POST" action="javascript:void(0);">
                 <div class="row">
                     <div class="col-md-6 mb-3">
                         <label for="category" class="form-label">Legal Category</label>
@@ -349,7 +293,7 @@ $legal_queries = $stmt->fetchAll();
                               placeholder="Please provide detailed information about your legal issue"><?= isset($_POST['description']) ? htmlspecialchars($_POST['description']) : '' ?></textarea>
                 </div>
                 <div class="d-grid">
-                    <button type="submit" class="btn btn-primary" name="submit_legal_query">
+                    <button type="submit" class="btn btn-primary">
                         <i class="fas fa-paper-plane me-2"></i>Submit Query
                     </button>
                 </div>
@@ -607,8 +551,8 @@ $legal_queries = $stmt->fetchAll();
                 <div class="col-md-6 text-md-end">
                     <h5>Contact Us</h5>
                     <p>
-                        <i class="fas fa-envelope me-2"></i> support@cyblex.com<br>
-                        <i class="fas fa-phone me-2"></i> +94 11 234 5678
+                        <i class="fas fa-envelope me-2"></i> shifa@trexsolutions.co<br>
+                        <i class="fas fa-phone me-2"></i> 70 217 0512
                     </p>
                 </div>
             </div>

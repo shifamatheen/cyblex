@@ -478,6 +478,8 @@ $(document).ready(function() {
     $('#legalQueryForm').on('submit', function(e) {
         e.preventDefault();
         
+        console.log('Form submission started');
+        
         const formData = {
             title: $('#title').val(),
             category: $('#category').val(),
@@ -486,21 +488,40 @@ $(document).ready(function() {
             language: $('#languagePreference').val() || 'en'
         };
 
+        console.log('Form data:', formData);
+
+        // Validate form data
+        if (!formData.title || !formData.category || !formData.description || !formData.urgency_level) {
+            alert('Please fill in all required fields');
+            return;
+        }
+
         $.ajax({
             url: 'api/submit_query.php',
             method: 'POST',
             data: formData,
+            dataType: 'json',
             success: function(response) {
+                console.log('Success response:', response);
                 if (response.success) {
                     alert('Query submitted successfully!');
                     $('#legalQueryForm')[0].reset();
                     location.reload();
                 } else {
-                    alert('Error: ' + response.message);
+                    alert('Error: ' + (response.message || 'Unknown error occurred'));
                 }
             },
-            error: function() {
-                alert('An error occurred while submitting the query.');
+            error: function(xhr, status, error) {
+                console.error('AJAX Error:', status, error);
+                console.error('Response Text:', xhr.responseText);
+                console.error('Status Code:', xhr.status);
+                
+                try {
+                    const response = JSON.parse(xhr.responseText);
+                    alert('Error: ' + (response.message || 'Unknown error occurred'));
+                } catch (e) {
+                    alert('An error occurred while submitting the query. Please try again.');
+                }
             }
         });
     });
