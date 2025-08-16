@@ -31,6 +31,13 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_type']) || $_SESSION[
 $db = Database::getInstance();
 $conn = $db->getConnection();
 
+// Validate user_id
+if (!isset($_SESSION['user_id']) || !is_numeric($_SESSION['user_id'])) {
+    error_log("Lawyer dashboard: Invalid user_id in session: " . ($_SESSION['user_id'] ?? 'not set'));
+    header('Location: login.html');
+    exit();
+}
+
 // Get lawyer information
 try {
     // First check if the status column exists in lawyers table
@@ -48,16 +55,21 @@ try {
             l.hourly_rate,
             l.languages,
             l.verification_status,
-            l.status
+            u.status
         FROM users u 
-        JOIN lawyers l ON u.id = l.user_id 
+        LEFT JOIN lawyers l ON u.id = l.user_id 
         WHERE u.id = ?
     ");
     $stmt->execute([$_SESSION['user_id']]);
     $lawyer = $stmt->fetch();
 
-    // If lawyer profile doesn't exist, create one
-    if (!$lawyer['specialization']) {
+    // Debug logging
+    if (!$lawyer) {
+        error_log("Lawyer dashboard: No lawyer record found for user_id: " . $_SESSION['user_id']);
+    }
+
+    // If lawyer profile doesn't exist or query returned false, create one
+    if (!$lawyer || !isset($lawyer['specialization'])) {
         $stmt = $conn->prepare("
             INSERT INTO lawyers (
                 user_id, 
@@ -67,7 +79,7 @@ try {
                 hourly_rate, 
                 languages,
                 status
-            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en', 'pending')
+            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en', 'active')
         ");
         $stmt->execute([$_SESSION['user_id']]);
         
@@ -80,9 +92,9 @@ try {
                 l.hourly_rate,
                 l.languages,
                 l.verification_status,
-                l.status
+                u.status
             FROM users u 
-            JOIN lawyers l ON u.id = l.user_id 
+            LEFT JOIN lawyers l ON u.id = l.user_id 
             WHERE u.id = ?
         ");
         $stmt->execute([$_SESSION['user_id']]);
@@ -117,7 +129,7 @@ try {
                 hourly_rate, 
                 languages,
                 status
-            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en', 'pending')
+            ) VALUES (?, 'General', 0, 'PENDING', 0.00, 'en', 'active')
         ");
         $stmt->execute([$_SESSION['user_id']]);
         
@@ -130,9 +142,9 @@ try {
                 l.hourly_rate,
                 l.languages,
                 l.verification_status,
-                l.status
+                u.status
             FROM users u 
-            JOIN lawyers l ON u.id = l.user_id 
+            LEFT JOIN lawyers l ON u.id = l.user_id 
             WHERE u.id = ?
         ");
         $stmt->execute([$_SESSION['user_id']]);
@@ -140,6 +152,20 @@ try {
     } else {
         throw $e; // Re-throw if it's a different error
     }
+}
+
+// Ensure we have valid lawyer data with fallback values
+if (!$lawyer || !is_array($lawyer)) {
+    $lawyer = [
+        'id' => $_SESSION['user_id'] ?? 0,
+        'full_name' => $_SESSION['full_name'] ?? 'User',
+        'specialization' => 'General',
+        'experience_years' => 0,
+        'hourly_rate' => 0.00,
+        'languages' => 'en',
+        'verification_status' => 'pending',
+        'status' => 'active' // Default to active for existing users
+    ];
 }
 
 // Get lawyer statistics
@@ -524,7 +550,7 @@ try {
                     <li class="nav-item dropdown">
                         <a class="nav-link dropdown-toggle" href="#" id="userDropdown" role="button" data-bs-toggle="dropdown">
                             <i class="fas fa-user-circle"></i>
-                            <span id="userName"><?= htmlspecialchars($lawyer['full_name']) ?></span>
+                            <span id="userName"><?= htmlspecialchars($lawyer['full_name'] ?? 'User') ?></span>
                         </a>
                         <div class="dropdown-menu dropdown-menu-end">
                             <a class="dropdown-item text-danger" href="logout.php">
@@ -538,7 +564,7 @@ try {
     </nav>
 
     <div class="main-content">
-        <?php if ($lawyer['status'] !== 'active'): ?>
+        <?php if (isset($lawyer['status']) && $lawyer['status'] !== 'active'): ?>
         <div class="alert alert-warning alert-dismissible fade show" role="alert">
             <i class="fas fa-exclamation-triangle me-2"></i>
             <strong>Account Pending Approval</strong>
@@ -555,7 +581,7 @@ try {
                     <div class="value"><?= $pending_count ?></div>
                 </div>
             </div>
-            <?php if ($lawyer['status'] === 'active'): ?>
+            <?php if (isset($lawyer['status']) && $lawyer['status'] === 'active'): ?>
             <div class="col-md-3">
                 <div class="stats-card">
                     <h4><i class="fas fa-comments"></i> Active Chats</h4>
@@ -656,7 +682,7 @@ try {
                                             <button class="btn btn-sm btn-primary view-query" data-id="<?= $query['id'] ?>">
                                                 <i class="fas fa-eye"></i> View
                                             </button>
-                                            <?php if ($lawyer['status'] === 'active'): ?>
+                                            <?php if (isset($lawyer['status']) && $lawyer['status'] === 'active'): ?>
                                             <button class="btn btn-sm btn-success accept-query" data-id="<?= $query['id'] ?>">
                                                 <i class="fas fa-check"></i> Accept
                                             </button>
@@ -670,7 +696,7 @@ try {
                     <?php endif; ?>
                 </section>
 
-                <?php if ($lawyer['status'] === 'active'): ?>
+                <?php if (isset($lawyer['status']) && $lawyer['status'] === 'active'): ?>
                 <!-- Accepted Legal Queries -->
                 <section id="accepted" class="section-card">
                     <h3><i class="fas fa-check-circle"></i> Accepted Queries</h3>
@@ -755,21 +781,66 @@ try {
                 <!-- Profile & Verification Status -->
                 <section id="profile" class="section-card">
                     <h3><i class="fas fa-user-cog"></i>Profile Status</h3>
-                    <div class="verification-status mb-3">
-                        <span class="status-badge status-<?= $lawyer['status'] ?>">
-                            <?= ucfirst($lawyer['status']) ?> Verification
+                    
+                    <!-- Account Status -->
+                    <div class="status-section mb-3">
+                        <h6 class="text-muted mb-2">Account Status</h6>
+                        <span class="status-badge status-<?= $lawyer['status'] ?? 'pending' ?>">
+                            <i class="fas fa-<?= ($lawyer['status'] === 'active') ? 'check-circle' : (($lawyer['status'] === 'suspended') ? 'ban' : 'clock') ?>"></i>
+                            <?= ucfirst($lawyer['status'] ?? 'pending') ?>
                         </span>
                     </div>
+                    
+                    <!-- Verification Status -->
+                    <div class="status-section mb-3">
+                        <h6 class="text-muted mb-2">Verification Status</h6>
+                        <span class="status-badge status-<?= $lawyer['verification_status'] ?? 'pending' ?>">
+                            <i class="fas fa-<?= ($lawyer['verification_status'] === 'verified') ? 'shield-check' : (($lawyer['verification_status'] === 'rejected') ? 'times-circle' : 'hourglass-half') ?>"></i>
+                            <?= ucfirst($lawyer['verification_status'] ?? 'pending') ?> Verification
+                        </span>
+                    </div>
+                    
+                    <!-- Profile Information -->
                     <div class="profile-info">
-                        <p><strong>Specialization:</strong> <span id="specialization"><?= htmlspecialchars($lawyer['specialization']) ?></span></p>
-                        <p><strong>Experience:</strong> <span id="experience"><?= htmlspecialchars($lawyer['experience_years']) ?></span> years</p>
-                        <?php if ($lawyer['status'] === 'active'): ?>
-                        <p><strong>Rating:</strong> <span id="rating"><?= $avg_rating ?></span></p>
+                        <h6 class="text-muted mb-2">Profile Details</h6>
+                        <div class="profile-detail">
+                            <i class="fas fa-gavel text-primary"></i>
+                            <span><strong>Specialization:</strong> <?= htmlspecialchars($lawyer['specialization'] ?? 'General') ?></span>
+                        </div>
+                        <div class="profile-detail">
+                            <i class="fas fa-clock text-info"></i>
+                            <span><strong>Experience:</strong> <?= htmlspecialchars($lawyer['experience_years'] ?? '0') ?> years</span>
+                        </div>
+                        <div class="profile-detail">
+                            <i class="fas fa-dollar-sign text-success"></i>
+                            <span><strong>Hourly Rate:</strong> $<?= number_format($lawyer['hourly_rate'] ?? 0, 2) ?></span>
+                        </div>
+                        <div class="profile-detail">
+                            <i class="fas fa-language text-warning"></i>
+                            <span><strong>Languages:</strong> <?= htmlspecialchars($lawyer['languages'] ?? 'English') ?></span>
+                        </div>
+                        <?php if (isset($lawyer['status']) && $lawyer['status'] === 'active'): ?>
+                        <div class="profile-detail">
+                            <i class="fas fa-star text-warning"></i>
+                            <span><strong>Rating:</strong> <?= number_format($avg_rating, 1) ?>/5.0</span>
+                        </div>
+                        <?php endif; ?>
+                    </div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="profile-actions mt-3">
+                        <button class="btn btn-outline-primary btn-sm w-100 mb-2" onclick="editProfile()">
+                            <i class="fas fa-edit"></i> Edit Profile
+                        </button>
+                        <?php if ($lawyer['verification_status'] === 'pending'): ?>
+                        <button class="btn btn-outline-warning btn-sm w-100" onclick="submitVerification()">
+                            <i class="fas fa-upload"></i> Submit Verification
+                        </button>
                         <?php endif; ?>
                     </div>
                 </section>
 
-                <?php if ($lawyer['status'] === 'active'): ?>
+                <?php if (isset($lawyer['status']) && $lawyer['status'] === 'active'): ?>
                 <!-- Quick Actions -->
                 <section class="section-card">
                     <h3><i class="fas fa-bolt"></i>Quick Actions</h3>

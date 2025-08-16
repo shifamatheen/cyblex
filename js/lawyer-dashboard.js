@@ -6,20 +6,13 @@ let lastMessageId = 0;
 let chatInterval = null;
 
 document.addEventListener('DOMContentLoaded', function() {
-    // Check authentication
-    const token = localStorage.getItem('token');
-    const user = JSON.parse(localStorage.getItem('user') || '{}');
-
-    if (!token || !user.id) {
-        console.error('No token or user found');
-        window.location.href = 'login.html';
-        return;
-    }
-
-    // Set user name in navbar
+    // Check if we're on the lawyer dashboard (session-based auth)
+    console.log('Lawyer dashboard loaded');
+    
+    // Set user name in navbar (will be populated by PHP)
     const userNameElement = document.getElementById('userName');
-    if (userNameElement) {
-                    userNameElement.textContent = user.full_name || user.email;
+    if (userNameElement && !userNameElement.textContent.trim()) {
+        console.log('User name not set, will be populated by PHP');
     }
 
     // Chat functionality
@@ -92,7 +85,6 @@ document.addEventListener('DOMContentLoaded', function() {
             fetch(`api/get_messages.php?id=${queryId}&type=query&lastId=${lastMessageId}`, {
                 method: 'GET',
                 headers: {
-                    'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
                 credentials: 'include'
@@ -151,9 +143,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${token}`,
                     'X-Requested-With': 'XMLHttpRequest'
                 },
+                credentials: 'include',
                 body: JSON.stringify({ queryId: queryId })
             })
             .then(response => response.json())
@@ -189,16 +181,8 @@ document.addEventListener('DOMContentLoaded', function() {
             return;
         }
 
-        // Check if user is logged in
-        const user = JSON.parse(localStorage.getItem('user'));
-        const token = localStorage.getItem('token');
-        
-        if (!user || !token) {
-            console.error('User not logged in or token missing');
-            showError('Please log in to access the chat');
-            window.location.href = 'login.html';
-            return;
-        }
+        // Check if user is logged in (session-based auth)
+        console.log('Initializing chat for query:', queryId);
 
         currentQueryId = queryId;
         const chatMessages = document.querySelector('#chatModal .chat-messages');
@@ -225,18 +209,11 @@ document.addEventListener('DOMContentLoaded', function() {
         console.log('Fetching initial messages for query:', queryId);
         fetch(`api/get_messages.php?id=${queryId}&type=query`, {
             headers: {
-                'Authorization': `Bearer ${token}`,
                 'Content-Type': 'application/json'
             },
             credentials: 'include'
         })
         .then(response => {
-            if (response.status === 401) {
-                localStorage.removeItem('token');
-                localStorage.removeItem('user');
-                window.location.href = 'login.html';
-                throw new Error('Session expired. Please log in again.');
-            }
             if (!response.ok) {
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
@@ -304,8 +281,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 const response = await fetch('api/send_message.php', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
+                        'Content-Type': 'application/json'
                     },
                     credentials: 'include',
                     body: JSON.stringify({
@@ -371,9 +347,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 const response = await fetch('api/accept_query.php', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
+                        'Content-Type': 'application/json'
                     },
+                    credentials: 'include',
                     body: JSON.stringify({
                         query_id: queryId
                     })
@@ -427,8 +403,9 @@ document.addEventListener('DOMContentLoaded', function() {
         fetch('api/accept_query.php', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
+            credentials: 'include',
             body: JSON.stringify({
                 queryId: queryId
             })
@@ -448,35 +425,37 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Complete query button click handler
-    document.querySelectorAll('.complete-query').forEach(button => {
-        button.addEventListener('click', function() {
-            const queryId = this.dataset.id;
+        // Complete query button click handler using event delegation
+    document.addEventListener('click', function(e) {
+        if (e.target.closest('.complete-query')) {
+            const button = e.target.closest('.complete-query');
+            const queryId = button.dataset.id;
+            
             if (confirm('Are you sure you want to mark this query as completed?')) {
-                fetch('api/complete_query.php', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                fetch('api/lawyer_complete_query.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
                         'X-Requested-With': 'XMLHttpRequest'
                     },
+                    credentials: 'include', // Include session cookies
                     body: JSON.stringify({ queryId: queryId })
                 })
                 .then(response => response.json())
-            .then(data => {
-                if (data.success) {
+                .then(data => {
+                    if (data.success) {
                         alert('Query completed successfully');
                         location.reload(); // Refresh to update the list
-                } else {
-                        alert(data.message || 'Failed to complete query');
-                }
-            })
-            .catch(error => {
+                    } else {
+                        alert(data.error || data.message || 'Failed to complete query');
+                    }
+                })
+                .catch(error => {
                     console.error('Error:', error);
                     alert('Failed to complete query');
                 });
             }
-        });
+        }
     });
 });
 
@@ -612,4 +591,183 @@ function showSuccess(message) {
     `;
     document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.container').firstChild);
     setTimeout(() => alertDiv.remove(), 5000);
+}
+
+// Profile Management Functions
+function editProfile() {
+    // Create a modal for editing profile
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.id = 'editProfileModal';
+    modal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Profile</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <form id="editProfileForm">
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="specialization" class="form-label">Specialization</label>
+                                    <input type="text" class="form-control" id="specialization" name="specialization" value="${document.getElementById('specialization')?.textContent || 'General'}">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="experience" class="form-label">Years of Experience</label>
+                                    <input type="number" class="form-control" id="experience" name="experience_years" value="${document.getElementById('experience')?.textContent || '0'}">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="hourly_rate" class="form-label">Hourly Rate ($)</label>
+                                    <input type="number" step="0.01" class="form-control" id="hourly_rate" name="hourly_rate" value="0.00">
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <div class="mb-3">
+                                    <label for="languages" class="form-label">Languages</label>
+                                    <input type="text" class="form-control" id="languages" name="languages" value="English">
+                                </div>
+                            </div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="bio" class="form-label">Bio</label>
+                            <textarea class="form-control" id="bio" name="bio" rows="4" placeholder="Tell clients about your expertise and experience..."></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveProfile()">Save Changes</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
+    
+    // Remove modal from DOM when hidden
+    modal.addEventListener('hidden.bs.modal', function() {
+        document.body.removeChild(modal);
+    });
+}
+
+function saveProfile() {
+    const form = document.getElementById('editProfileForm');
+    const formData = new FormData(form);
+    
+    fetch('api/update_lawyer_profile.php', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        credentials: 'include',
+        body: JSON.stringify(Object.fromEntries(formData))
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccess('Profile updated successfully!');
+            // Refresh the page to show updated data
+            location.reload();
+        } else {
+            showError(data.message || 'Failed to update profile');
+        }
+    })
+    .catch(error => {
+        console.error('Error updating profile:', error);
+        showError('Failed to update profile. Please try again.');
+    });
+}
+
+function submitVerification() {
+    // Create a modal for submitting verification documents
+    const modal = document.createElement('div');
+    modal.className = 'modal fade';
+    modal.id = 'verificationModal';
+    modal.innerHTML = `
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Submit Verification Documents</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <i class="fas fa-info-circle"></i>
+                        Please upload the following documents for verification:
+                    </div>
+                    <form id="verificationForm">
+                        <div class="mb-3">
+                            <label for="bar_council" class="form-label">Bar Council Certificate</label>
+                            <input type="file" class="form-control" id="bar_council" name="bar_council" accept=".pdf,.jpg,.jpeg,.png" required>
+                            <div class="form-text">Upload your bar council certificate or license</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="id_proof" class="form-label">Government ID Proof</label>
+                            <input type="file" class="form-control" id="id_proof" name="id_proof" accept=".pdf,.jpg,.jpeg,.png" required>
+                            <div class="form-text">Upload a valid government-issued ID</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="experience_cert" class="form-label">Experience Certificate (Optional)</label>
+                            <input type="file" class="form-control" id="experience_cert" name="experience_cert" accept=".pdf,.jpg,.jpeg,.png">
+                            <div class="form-text">Upload experience certificates if available</div>
+                        </div>
+                        <div class="mb-3">
+                            <label for="verification_notes" class="form-label">Additional Notes</label>
+                            <textarea class="form-control" id="verification_notes" name="verification_notes" rows="3" placeholder="Any additional information you'd like to provide..."></textarea>
+                        </div>
+                    </form>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="uploadVerification()">Submit for Review</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    document.body.appendChild(modal);
+    const bootstrapModal = new bootstrap.Modal(modal);
+    bootstrapModal.show();
+    
+    // Remove modal from DOM when hidden
+    modal.addEventListener('hidden.bs.modal', function() {
+        document.body.removeChild(modal);
+    });
+}
+
+function uploadVerification() {
+    const form = document.getElementById('verificationForm');
+    const formData = new FormData(form);
+    
+    fetch('api/submit_verification.php', {
+        method: 'POST',
+        credentials: 'include',
+        body: formData
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showSuccess('Verification documents submitted successfully! Our team will review them within 2-3 business days.');
+            // Close modal and refresh page
+            const modal = bootstrap.Modal.getInstance(document.getElementById('verificationModal'));
+            modal.hide();
+            location.reload();
+        } else {
+            showError(data.message || 'Failed to submit verification documents');
+        }
+    })
+    .catch(error => {
+        console.error('Error submitting verification:', error);
+        showError('Failed to submit verification documents. Please try again.');
+    });
 } 

@@ -1,9 +1,9 @@
 <?php
 // Database configuration
-define('DB_HOST', 'fdb1034.awardspace.net');
-define('DB_USER', '4666256_cyblex');
-define('DB_PASS', 'lFcgcc262moS33i%');
-define('DB_NAME', '4666256_cyblex');
+define('DB_HOST', 'localhost');
+define('DB_USER', 'root');
+define('DB_PASS', '');
+define('DB_NAME', 'cyblex');
 define('JWT_SECRET', 'b2fd856537d804aeabf63931cd1967584c0f2b8079c403ddd75c40b1366e4f84016d7aaf09c8fb3dc3ed136c2e0fdd28b96556d463b53f982d003facc74526c7');
 
 class Database {
