@@ -154,6 +154,9 @@ $legal_queries = $stmt->fetchAll();
         .rating-stars .fa-star:hover ~ .fa-star {
             color: #ddd;
         }
+        .chat-messages {
+            background-color: #f8f9fa;
+        }
         .message {
             margin-bottom: 1rem;
             max-width: 80%;
