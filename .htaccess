@@ -9,14 +9,14 @@ RewriteEngine On
 RewriteCond %{REQUEST_METHOD} OPTIONS
 RewriteRule ^(.*)$ $1 [R=200,L]
 
-# PHP settings
-php_value session.cookie_httponly 1
-php_value session.cookie_secure 1
-php_value session.cookie_samesite "Strict"
-php_value session.gc_maxlifetime 3600
-php_value session.cookie_lifetime 3600 
-
-RewriteEngine On
+# PHP settings (only if mod_php is loaded)
+<IfModule mod_php.c>
+    php_value session.cookie_httponly 1
+    php_value session.cookie_secure 0
+    php_value session.cookie_samesite "Lax"
+    php_value session.gc_maxlifetime 3600
+    php_value session.cookie_lifetime 3600
+</IfModule>
 
 # Redirect index.html to index.php
 RewriteRule ^index\.html$ index.php [L,R=301]
@@ -27,4 +27,5 @@ RewriteRule ^$ index.php [L]
 # Handle other redirects if needed
 RewriteCond %{REQUEST_FILENAME} !-f
 RewriteCond %{REQUEST_FILENAME} !-d
+RewriteCond %{REQUEST_URI} !^/api/
 RewriteRule ^(.*)$ index.php [L] 

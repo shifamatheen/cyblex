@@ -58,7 +58,7 @@ try {
     
     // Verify the query belongs to the current lawyer and is in a completable state
     $stmt = $conn->prepare("
-        SELECT id, status, lawyer_id 
+        SELECT id, status, lawyer_id, payment_status
         FROM legal_queries 
         WHERE id = ? AND lawyer_id = ? AND status IN ('assigned', 'in_progress')
     ");
@@ -68,6 +68,13 @@ try {
     if (!$query) {
         http_response_code(404);
         echo json_encode(['success' => false, 'error' => 'Query not found or cannot be completed']);
+        exit();
+    }
+
+    // Check payment status
+    if (isset($query['payment_status']) && $query['payment_status'] !== 'completed') {
+        http_response_code(400);
+        echo json_encode(['success' => false, 'error' => 'Payment must be completed before completing the query']);
         exit();
     }
     

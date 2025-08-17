@@ -43,6 +43,11 @@ try {
         throw new Exception('Query not found or unauthorized access');
     }
 
+    // Check payment status for clients
+    if ($userType === 'client' && isset($query['payment_status']) && $query['payment_status'] !== 'completed') {
+        throw new Exception('Payment must be completed before starting chat');
+    }
+
     // Update query status to in_progress if it's assigned
     if ($query['status'] === 'assigned') {
         $stmt = $conn->prepare("

@@ -712,6 +712,7 @@ try {
                                         <th>Title</th>
                                         <th>Urgency</th>
                                         <th>Status</th>
+                                        <th>Payment</th>
                                         <th>Created</th>
                                         <th>Actions</th>
                                     </tr>
@@ -745,8 +746,30 @@ try {
                                                 <?= ucfirst(str_replace('_', ' ', $query['status'])) ?>
                                             </span>
                                         </td>
+                                        <td>
+                                            <?php if (isset($query['payment_amount']) && $query['payment_amount'] > 0): ?>
+                                                <?php if (isset($query['payment_status']) && $query['payment_status'] === 'completed'): ?>
+                                                    <span class="badge bg-success">
+                                                        <i class="fas fa-check"></i> Paid LKR <?= number_format($query['payment_amount'], 2) ?>
+                                                    </span>
+                                                <?php elseif (isset($query['payment_status']) && $query['payment_status'] === 'pending'): ?>
+                                                    <span class="badge bg-warning">
+                                                        <i class="fas fa-clock"></i> Pending LKR <?= number_format($query['payment_amount'], 2) ?>
+                                                    </span>
+                                                <?php else: ?>
+                                                    <span class="text-muted">LKR <?= number_format($query['payment_amount'], 2) ?></span>
+                                                <?php endif; ?>
+                                            <?php else: ?>
+                                                <span class="text-muted">-</span>
+                                            <?php endif; ?>
+                                        </td>
                                         <td><?= date('Y-m-d', strtotime($query['created_at'])) ?></td>
                                         <td>
+                                            <?php if (isset($query['payment_status']) && $query['payment_status'] === 'pending'): ?>
+                                            <span class="badge bg-warning">
+                                                <i class="fas fa-clock"></i> Awaiting Payment
+                                            </span>
+                                            <?php else: ?>
                                             <button class="btn btn-sm btn-primary view-query" data-id="<?= $query['id'] ?>">
                                                 <i class="fas fa-eye"></i> View
                                             </button>
@@ -757,6 +780,7 @@ try {
                                             <button class="btn btn-sm btn-info complete-query" data-id="<?= $query['id'] ?>">
                                                 <i class="fas fa-check-circle"></i> Complete
                                             </button>
+                                            <?php endif; ?>
                                             <?php endif; ?>
                                         </td>
                                     </tr>

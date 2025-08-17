@@ -10,8 +10,15 @@ if (!isset($_SESSION['user_id']) || !isset($_SESSION['user_type']) || $_SESSION[
 
 // Get POST data
 $data = json_decode(file_get_contents('php://input'), true);
-if (!isset($data['queryId'])) {
-    echo json_encode(['success' => false, 'message' => 'Query ID is required']);
+if (!isset($data['queryId']) || !isset($data['paymentAmount'])) {
+    echo json_encode(['success' => false, 'message' => 'Query ID and payment amount are required']);
+    exit();
+}
+
+// Validate payment amount
+$paymentAmount = floatval($data['paymentAmount']);
+if ($paymentAmount <= 0) {
+    echo json_encode(['success' => false, 'message' => 'Payment amount must be greater than 0']);
     exit();
 }
 
@@ -53,13 +60,27 @@ try {
         $conn->exec("ALTER TABLE legal_queries ADD FOREIGN KEY (lawyer_id) REFERENCES lawyers(id) ON DELETE SET NULL");
     }
 
-    // Update query status
+    // Check if payment_amount and payment_status columns exist
+    $stmt = $conn->query("SHOW COLUMNS FROM legal_queries LIKE 'payment_amount'");
+    if ($stmt->rowCount() == 0) {
+        $conn->exec("ALTER TABLE legal_queries ADD COLUMN payment_amount DECIMAL(10,2) DEFAULT NULL AFTER status");
+    }
+
+    $stmt = $conn->query("SHOW COLUMNS FROM legal_queries LIKE 'payment_status'");
+    if ($stmt->rowCount() == 0) {
+        $conn->exec("ALTER TABLE legal_queries ADD COLUMN payment_status ENUM('pending','completed','failed') DEFAULT 'pending' AFTER payment_amount");
+    }
+
+    // Update query status with payment information
     $stmt = $conn->prepare("
         UPDATE legal_queries 
-        SET lawyer_id = ?, status = 'assigned' 
+        SET lawyer_id = ?, 
+            status = 'assigned',
+            payment_amount = ?,
+            payment_status = 'pending'
         WHERE id = ? AND status = 'pending'
     ");
-    $stmt->execute([$lawyerId, $data['queryId']]);
+    $stmt->execute([$lawyerId, $paymentAmount, $data['queryId']]);
 
     if ($stmt->rowCount() === 0) {
         throw new Exception('Query not found or already assigned');
@@ -70,7 +91,7 @@ try {
 
     echo json_encode([
         'success' => true,
-        'message' => 'Query accepted successfully'
+        'message' => 'Query accepted successfully with payment amount of LKR ' . number_format($paymentAmount, 2)
     ]);
 } catch (Exception $e) {
     // Rollback transaction on error

@@ -396,7 +396,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Function to accept a query
     function acceptQuery(queryId) {
-        if (!confirm('Are you sure you want to accept this query?')) {
+        const paymentAmount = prompt('Please enter the payment amount for this query (e.g., 50.00):');
+        
+        if (paymentAmount === null) {
+            return; // User cancelled
+        }
+        
+        const amount = parseFloat(paymentAmount);
+        if (isNaN(amount) || amount <= 0) {
+            alert('Please enter a valid payment amount greater than 0');
+            return;
+        }
+
+        if (!confirm(`Are you sure you want to accept this query with a payment amount of LKR ${amount.toFixed(2)}?`)) {
             return;
         }
 
@@ -407,13 +419,14 @@ document.addEventListener('DOMContentLoaded', function() {
             },
             credentials: 'include',
             body: JSON.stringify({
-                queryId: queryId
+                queryId: queryId,
+                paymentAmount: amount
             })
         })
         .then(response => response.json())
         .then(data => {
             if (data.success) {
-                alert('Query accepted successfully');
+                alert(data.message);
                 location.reload(); // Refresh the page to update the list
             } else {
                 alert(data.message || 'Failed to accept query');

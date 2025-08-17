@@ -330,21 +330,37 @@ try {
         addForeignKey($conn, 'payments', 'fk_payments_client_id', "
             ALTER TABLE payments
             ADD CONSTRAINT fk_payments_client_id
-            FOREIGN KEY (client_id) REFERENCES users(id)
-            ON DELETE CASCADE
+            FOREIGN KEY (client_id) REFERENCES users(id) ON DELETE CASCADE
         ");
         addForeignKey($conn, 'payments', 'fk_payments_lawyer_id', "
             ALTER TABLE payments
             ADD CONSTRAINT fk_payments_lawyer_id
-            FOREIGN KEY (lawyer_id) REFERENCES lawyers(id)
-            ON DELETE CASCADE
+            FOREIGN KEY (lawyer_id) REFERENCES lawyers(id) ON DELETE CASCADE
         ");
         addForeignKey($conn, 'payments', 'fk_payments_consultation_id', "
             ALTER TABLE payments
             ADD CONSTRAINT fk_payments_consultation_id
-            FOREIGN KEY (consultation_id) REFERENCES consultations(id)
-            ON DELETE CASCADE
+            FOREIGN KEY (consultation_id) REFERENCES consultations(id) ON DELETE CASCADE
         ");
+
+        // 10. Add payment fields to legal_queries table
+        try {
+            $conn->exec("ALTER TABLE legal_queries ADD COLUMN payment_amount DECIMAL(10,2) DEFAULT NULL AFTER status");
+            echo "Added payment_amount column to legal_queries table\n";
+        } catch (PDOException $e) {
+            if (strpos($e->getMessage(), 'Duplicate column name') === false) {
+                echo "Error adding payment_amount column: " . $e->getMessage() . "\n";
+            }
+        }
+
+        try {
+            $conn->exec("ALTER TABLE legal_queries ADD COLUMN payment_status ENUM('pending','completed','failed') DEFAULT 'pending' AFTER payment_amount");
+            echo "Added payment_status column to legal_queries table\n";
+        } catch (PDOException $e) {
+            if (strpos($e->getMessage(), 'Duplicate column name') === false) {
+                echo "Error adding payment_status column: " . $e->getMessage() . "\n";
+            }
+        }
 
         // 10. Update notifications table
         dropForeignKey($conn, 'notifications', 'fk_notifications_user_id');

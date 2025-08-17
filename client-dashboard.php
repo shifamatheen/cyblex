@@ -311,6 +311,7 @@ $legal_queries = $stmt->fetchAll();
                             <th>Category</th>
                             <th>Urgency</th>
                             <th>Status</th>
+                            <th>Payment</th>
                             <th>Created</th>
                             <th>Actions</th>
                         </tr>
@@ -355,9 +356,31 @@ $legal_queries = $stmt->fetchAll();
                                      <?= ucfirst(str_replace('_', ' ', $query['status'])) ?>
                                  </span>
                              </td>
+                             <td>
+                                 <?php if (isset($query['payment_amount']) && $query['payment_amount'] > 0): ?>
+                                     <?php if (isset($query['payment_status']) && $query['payment_status'] === 'completed'): ?>
+                                         <span class="badge bg-success">
+                                             <i class="fas fa-check"></i> Paid LKR <?= number_format($query['payment_amount'], 2) ?>
+                                         </span>
+                                     <?php elseif (isset($query['payment_status']) && $query['payment_status'] === 'pending'): ?>
+                                         <span class="badge bg-warning">
+                                             <i class="fas fa-clock"></i> Pending LKR <?= number_format($query['payment_amount'], 2) ?>
+                                         </span>
+                                     <?php else: ?>
+                                         <span class="text-muted">LKR <?= number_format($query['payment_amount'], 2) ?></span>
+                                     <?php endif; ?>
+                                 <?php else: ?>
+                                     <span class="text-muted">-</span>
+                                 <?php endif; ?>
+                             </td>
                              <td><?= date('Y-m-d', strtotime($query['created_at'])) ?></td>
                              <td>
-                                 <?php if (in_array($query['status'], ['assigned', 'in_progress'])): ?>
+                                 <?php if (isset($query['payment_status']) && $query['payment_status'] === 'pending' && in_array($query['status'], ['assigned'])): ?>
+                                 <button class="btn btn-sm btn-warning pay-query" data-id="<?= $query['id'] ?>" data-amount="<?= $query['payment_amount'] ?>">
+                                     <i class="fas fa-credit-card"></i> Pay LKR <?= number_format($query['payment_amount'], 2) ?>
+                                 </button>
+                                 <?php endif; ?>
+                                 <?php if (isset($query['payment_status']) && $query['payment_status'] === 'completed' && in_array($query['status'], ['assigned', 'in_progress'])): ?>
                                  <button class="btn btn-sm btn-outline-primary start-chat" data-id="<?= $query['id'] ?>">
                                      <i class="fas fa-comments"></i> Chat
                                  </button>

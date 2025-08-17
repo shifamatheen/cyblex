@@ -768,6 +768,45 @@ $(document).ready(function() {
          });
      });
 
+     // Payment button click handler
+     $(document).on('click', '.pay-query', function() {
+         const queryId = $(this).data('id');
+         const amount = $(this).data('amount');
+         
+         if (!confirm(`Are you sure you want to proceed with payment of LKR ${amount}?`)) {
+             return;
+         }
+         
+         // Create and submit payment form directly
+         processPayment(queryId, amount);
+     });
+
+     // Function to process payment
+     function processPayment(queryId, amount) {
+         // Create a simple form and submit it
+         const form = document.createElement('form');
+         form.method = 'POST';
+         form.action = 'api/process_payment.php';
+         form.style.display = 'none';
+         
+         // Add form fields
+         const queryIdInput = document.createElement('input');
+         queryIdInput.type = 'hidden';
+         queryIdInput.name = 'queryId';
+         queryIdInput.value = queryId;
+         form.appendChild(queryIdInput);
+         
+         const amountInput = document.createElement('input');
+         amountInput.type = 'hidden';
+         amountInput.name = 'amount';
+         amountInput.value = amount;
+         form.appendChild(amountInput);
+         
+         // Add form to page and submit
+         document.body.appendChild(form);
+         form.submit();
+     }
+
      // Chat modal event handlers
      $('#chatModal').on('show.bs.modal', function() {
          // Chat modal is being opened

@@ -117,6 +117,8 @@ CREATE TABLE `legal_queries` (
   `description` text NOT NULL,
   `urgency_level` enum('low','medium','high') NOT NULL DEFAULT 'medium',
   `status` enum('pending','assigned','in_progress','completed','cancelled') NOT NULL DEFAULT 'pending',
+  `payment_amount` decimal(10,2) DEFAULT NULL,
+  `payment_status` enum('pending','completed','failed') DEFAULT 'pending',
   `created_at` timestamp NOT NULL DEFAULT current_timestamp(),
   `updated_at` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp()
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
