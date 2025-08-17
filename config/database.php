@@ -1,10 +1,30 @@
 <?php
 // Database configuration
-define('DB_HOST', 'localhost');
-define('DB_USER', 'root');
-define('DB_PASS', '');
-define('DB_NAME', 'cyblex');
-define('JWT_SECRET', 'secret-key');
+// Load environment variables if .env file exists
+if (file_exists(__DIR__ . '/../.env')) {
+    $envFile = file_get_contents(__DIR__ . '/../.env');
+    $lines = explode("\n", $envFile);
+    foreach ($lines as $line) {
+        if (strpos($line, '=') !== false && strpos($line, '#') !== 0) {
+            list($key, $value) = explode('=', $line, 2);
+            $_ENV[trim($key)] = trim($value);
+            putenv(trim($key) . '=' . trim($value));
+        }
+    }
+}
+
+define('DB_HOST', $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?? 'localhost');
+define('DB_USER', $_ENV['DB_USER'] ?? getenv('DB_USER') ?? 'root');
+define('DB_PASS', $_ENV['DB_PASS'] ?? getenv('DB_PASS') ?? '');
+define('DB_NAME', $_ENV['DB_NAME'] ?? getenv('DB_NAME') ?? 'cyblex');
+
+// JWT Secret - should be a strong, random string in production
+$jwtSecret = $_ENV['JWT_SECRET'] ?? getenv('JWT_SECRET');
+if (!$jwtSecret) {
+    error_log('Warning: JWT_SECRET not set in environment variables. Using default secret.');
+    $jwtSecret = 'default-jwt-secret-change-in-production';
+}
+define('JWT_SECRET', $jwtSecret);
 
 class Database {
     private static $instance = null;

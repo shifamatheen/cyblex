@@ -3,12 +3,34 @@
  * PayHere Payment Configuration
  * 
  * This file contains all PayHere payment gateway configuration settings.
- * Replace the placeholder values with your actual PayHere credentials.
+ * Environment variables should be set in your .env file or server configuration.
  */
 
+// Load environment variables if .env file exists
+if (file_exists(__DIR__ . '/../.env')) {
+    $envFile = file_get_contents(__DIR__ . '/../.env');
+    $lines = explode("\n", $envFile);
+    foreach ($lines as $line) {
+        if (strpos($line, '=') !== false && strpos($line, '#') !== 0) {
+            list($key, $value) = explode('=', $line, 2);
+            $_ENV[trim($key)] = trim($value);
+            putenv(trim($key) . '=' . trim($value));
+        }
+    }
+}
+
 // PayHere Merchant Configuration
-define('PAYHERE_MERCHANT_ID', '1231698'); // Replace with your actual Merchant ID
-define('PAYHERE_MERCHANT_SECRET', 'MzkxMzY0MTIxNjQwMDM2NzA5MTMyODg4MzY5MjczMjcyMTQwOTIz'); // Replace with your actual Merchant Secret
+$merchantId = $_ENV['PAYHERE_MERCHANT_ID'] ?? getenv('PAYHERE_MERCHANT_ID');
+$merchantSecret = $_ENV['PAYHERE_MERCHANT_SECRET'] ?? getenv('PAYHERE_MERCHANT_SECRET');
+
+// Validate required environment variables
+if (!$merchantId || !$merchantSecret) {
+    error_log('PayHere configuration error: Missing required environment variables PAYHERE_MERCHANT_ID or PAYHERE_MERCHANT_SECRET');
+    throw new Exception('PayHere configuration error: Missing required environment variables');
+}
+
+define('PAYHERE_MERCHANT_ID', $merchantId);
+define('PAYHERE_MERCHANT_SECRET', $merchantSecret);
 
 // PayHere API Endpoints
 define('PAYHERE_LIVE_URL', 'https://www.payhere.lk/pay/checkout');
